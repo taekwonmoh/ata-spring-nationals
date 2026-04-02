@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournament Manager</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green:   #16a34a;
+      --green-bg: #dcfce7;
+      --blue:    #1d4ed8;
+      --blue-bg: #dbeafe;
+      --yellow:  #b45309;
+      --yellow-bg: #fef9c3;
+      --orange:  #c2410c;
+      --orange-bg: #ffedd5;
+      --red:     #dc2626;
+      --red-bg:  #fee2e2;
+      --gray:    #6b7280;
+      --gray-bg: #f3f4f6;
+      --border:  #e5e7eb;
+      --white:   #ffffff;
+      --text:    #111827;
+      --text2:   #374151;
+      --accent:  #1d4ed8;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f4f8;
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1e3a5f;
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header .subtitle { font-size: 0.85rem; opacity: 0.75; margin-top: 2px; }
+    .header-stats {
+      display: flex; gap: 16px; flex-wrap: wrap;
+    }
+    .hstat {
+      text-align: center;
+      background: rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 8px 14px;
+      min-width: 80px;
+    }
+    .hstat .val { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+    .hstat .lbl { font-size: 0.7rem; opacity: 0.8; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* ── Nav Tabs ── */
+    nav {
+      background: white;
+      border-bottom: 2px solid var(--border);
+      display: flex;
+      overflow-x: auto;
+      padding: 0 16px;
+    }
+    nav button {
+      background: none; border: none; cursor: pointer;
+      padding: 14px 20px;
+      font-size: 1rem; font-weight: 600;
+      color: var(--gray);
+      border-bottom: 3px solid transparent;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    nav button:hover { color: var(--accent); }
+    nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Main ── */
+    main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Section heading ── */
+    .section-title {
+      font-size: 1.2rem; font-weight: 700;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .section-title span { color: var(--gray); font-weight: 400; font-size: 0.9rem; margin-left: 8px; }
+
+    /* ── Ring Grid ── */
+    .ring-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .ring-card {
+      background: white;
+      border-radius: 12px;
+      padding: 14px 12px;
+      border: 2px solid var(--border);
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+      text-align: center;
+      user-select: none;
+    }
+    .ring-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .ring-card .ring-num { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+    .ring-card .ring-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); margin-top: 2px; }
+    .ring-card .ring-status-badge {
+      margin-top: 8px;
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .ring-card .ring-judges { font-size: 0.75rem; color: var(--gray); margin-top: 6px; }
+
+    /* status colors */
+    .s-waiting   { border-color: var(--red);    background: var(--red-bg); }
+    .s-waiting .ring-num { color: var(--red); }
+    .s-waiting .ring-status-badge { background: var(--red); color: white; }
+
+    .s-ready     { border-color: var(--green);  background: var(--green-bg); }
+    .s-ready .ring-num { color: var(--green); }
+    .s-ready .ring-status-badge { background: var(--green); color: white; }
+
+    .s-on_time   { border-color: var(--blue);   background: var(--blue-bg); }
+    .s-on_time .ring-num { color: var(--blue); }
+    .s-on_time .ring-status-badge { background: var(--blue); color: white; }
+
+    .s-almost_done { border-color: var(--yellow); background: var(--yellow-bg); }
+    .s-almost_done .ring-num { color: var(--yellow); }
+    .s-almost_done .ring-status-badge { background: var(--yellow); color: white; }
+
+    .s-late      { border-color: var(--orange); background: var(--orange-bg); }
+    .s-late .ring-num { color: var(--orange); }
+    .s-late .ring-status-badge { background: var(--orange); color: white; }
+
+    .s-no_judges { border-color: #9ca3af; background: #f9fafb; }
+    .s-no_judges .ring-num { color: #9ca3af; }
+    .s-no_judges .ring-status-badge { background: #9ca3af; color: white; }
+
+    /* ── Legend ── */
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;
+    }
+    .legend-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.8rem; font-weight: 600;
+    }
+    .legend-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+    }
+
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;
+    }
+    .filter-btn {
+      padding: 6px 14px; border-radius: 20px;
+      border: 2px solid var(--border); background: white;
+      font-size: 0.82rem; font-weight: 600; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .filter-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    /* ── Ring Status Modal ── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: white; border-radius: 16px;
+      padding: 28px; width: 90%; max-width: 420px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 8px; }
+    .modal .modal-sub { color: var(--gray); font-size: 0.875rem; margin-bottom: 20px; }
+    .modal-status-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;
+    }
+    .modal-status-btn {
+      padding: 12px 8px; border-radius: 10px; border: 2px solid var(--border);
+      font-size: 0.85rem; font-weight: 700; cursor: pointer; background: white;
+      transition: all 0.15s; text-align: center;
+    }
+    .modal-status-btn:hover { transform: scale(1.03); }
+    .modal-status-btn.sel-on_time   { background: var(--blue-bg);   border-color: var(--blue);   color: var(--blue); }
+    .modal-status-btn.sel-almost_done { background: var(--yellow-bg); border-color: var(--yellow); color: var(--yellow); }
+    .modal-status-btn.sel-late      { background: var(--orange-bg); border-color: var(--orange); color: var(--orange); }
+    .modal-status-btn.sel-ready     { background: var(--green-bg);  border-color: var(--green);  color: var(--green); }
+    .modal-judge-list { margin-bottom: 16px; }
+    .modal-judge-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .modal-judge-row:last-child { border-bottom: none; }
+    .judge-chip {
+      padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700;
+    }
+    .chip-in  { background: var(--green-bg); color: var(--green); }
+    .chip-out { background: var(--red-bg);   color: var(--red); }
+    .btn-close {
+      width: 100%; padding: 12px; border-radius: 10px;
+      background: var(--gray-bg); border: none; cursor: pointer;
+      font-size: 1rem; font-weight: 600; color: var(--text2);
+    }
+    .btn-close:hover { background: var(--border); }
+
+    /* ── Check-In Tab ── */
+    .checkin-controls {
+      display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: center;
+    }
+    .search-box {
+      flex: 1; min-width: 200px;
+      padding: 10px 14px; border-radius: 10px;
+      border: 2px solid var(--border); font-size: 1rem;
+      outline: none;
+    }
+    .search-box:focus { border-color: var(--accent); }
+    .ring-filter-select {
+      padding: 10px 14px; border-radius: 10px;
+      border: 2px solid var(--border); font-size: 0.9rem;
+      background: white; outline: none; cursor: pointer;
+    }
+    .ring-filter-select:focus { border-color: var(--accent); }
+
+    .judge-list { display: flex; flex-direction: column; gap: 8px; }
+    .judge-row {
+      background: white; border-radius: 12px;
+      padding: 14px 16px;
+      border: 2px solid var(--border);
+      display: flex; align-items: center; gap: 14px;
+      flex-wrap: wrap;
+    }
+    .judge-row.checked-in { border-color: var(--green); background: var(--green-bg); }
+    .judge-info { flex: 1; min-width: 120px; }
+    .judge-name { font-size: 1rem; font-weight: 700; }
+    .judge-meta { font-size: 0.8rem; color: var(--gray); margin-top: 2px; }
+    .judge-time { font-size: 0.75rem; color: var(--green); font-weight: 600; margin-top: 2px; }
+    .btn-checkin {
+      padding: 10px 20px; border-radius: 10px; border: none;
+      font-size: 0.9rem; font-weight: 700; cursor: pointer;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .btn-checkin.in  { background: var(--green); color: white; }
+    .btn-checkin.in:hover  { background: #15803d; }
+    .btn-checkin.out { background: #dc2626; color: white; }
+    .btn-checkin.out:hover { background: #b91c1c; }
+    .btn-checkin.undo { background: var(--gray-bg); color: var(--text2); border: 2px solid var(--border); }
+    .btn-checkin.undo:hover { background: var(--border); }
+
+    /* ── Reports ── */
+    .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 700px) { .report-grid { grid-template-columns: 1fr; } }
+    .report-card {
+      background: white; border-radius: 14px; padding: 20px;
+      border: 2px solid var(--border);
+    }
+    .report-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; }
+    .report-card .report-count {
+      font-size: 2rem; font-weight: 800; margin: 8px 0 16px;
+    }
+    .report-card.warn .report-count { color: var(--red); }
+    .report-card.ok   .report-count { color: var(--green); }
+    .report-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.88rem;
+    }
+    .report-item:last-child { border-bottom: none; }
+    .report-item .ri-name { font-weight: 600; }
+    .report-item .ri-sub  { color: var(--gray); font-size: 0.78rem; }
+    .report-tag {
+      padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700;
+    }
+    .tag-missing { background: var(--red-bg);  color: var(--red); }
+    .tag-noshow  { background: var(--orange-bg); color: var(--orange); }
+    .tag-partial { background: var(--yellow-bg); color: var(--yellow); }
+    .empty-state { color: var(--gray); text-align: center; padding: 24px 0; font-size: 0.9rem; }
+
+    /* ── Setup Tab ── */
+    .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 700px) { .setup-grid { grid-template-columns: 1fr; } }
+    .setup-card {
+      background: white; border-radius: 14px; padding: 20px; border: 2px solid var(--border);
+    }
+    .setup-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; }
+    .form-row { margin-bottom: 14px; }
+    .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
+    .form-input, .form-select {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 2px solid var(--border); font-size: 0.95rem; outline: none;
+    }
+    .form-input:focus, .form-select:focus { border-color: var(--accent); }
+    .btn-primary {
+      padding: 11px 20px; border-radius: 10px; border: none;
+      background: var(--accent); color: white;
+      font-size: 0.95rem; font-weight: 700; cursor: pointer;
+      transition: background 0.15s; width: 100%;
+    }
+    .btn-primary:hover { background: #1e40af; }
+    .btn-danger {
+      background: none; border: none; cursor: pointer;
+      color: var(--red); font-size: 1.1rem; padding: 4px 8px;
+      border-radius: 6px; transition: background 0.15s;
+    }
+    .btn-danger:hover { background: var(--red-bg); }
+    .judge-setup-list { margin-top: 10px; max-height: 340px; overflow-y: auto; }
+    .judge-setup-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.88rem;
+    }
+    .judge-setup-row:last-child { border-bottom: none; }
+    .jsr-name { flex: 1; font-weight: 600; }
+    .jsr-meta { color: var(--gray); font-size: 0.78rem; }
+    .import-area {
+      width: 100%; min-height: 100px; padding: 10px 12px;
+      border-radius: 10px; border: 2px solid var(--border);
+      font-size: 0.85rem; font-family: monospace; resize: vertical; outline: none;
+    }
+    .import-area:focus { border-color: var(--accent); }
+    .help-text { font-size: 0.78rem; color: var(--gray); margin-top: 4px; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+      background: #1e293b; color: white; padding: 12px 24px;
+      border-radius: 30px; font-size: 0.9rem; font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+      transition: transform 0.3s; z-index: 200; white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* ── Responsive ── */
+    @media (max-width: 500px) {
+      header h1 { font-size: 1.2rem; }
+      .ring-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+      main { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div>
+    <div id="tournamentTitle" style="font-size:1.5rem;font-weight:700;">Tournament Manager</div>
+    <div class="subtitle" id="headerSub">Martial Arts Tournament</div>
+  </div>
+  <div class="header-stats" id="headerStats"></div>
+</header>
+
+<!-- Nav -->
+<nav>
+  <button class="active" onclick="switchTab('dashboard')">Dashboard</button>
+  <button onclick="switchTab('checkin')">Judge Check-In</button>
+  <button onclick="switchTab('reports')">Reports</button>
+  <button onclick="switchTab('setup')">Setup</button>
+</nav>
+
+<main>
+
+  <!-- ═══════════════════════════ DASHBOARD ═══════════════════════════ -->
+  <div id="tab-dashboard" class="tab-content active">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Waiting for Judges</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Ready</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div> On Time</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div> Almost Done</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Late</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#9ca3af"></div> No Judges Assigned</div>
+    </div>
+    <div class="filter-bar">
+      <button class="filter-btn active" onclick="setDashFilter('all',this)">All</button>
+      <button class="filter-btn" onclick="setDashFilter('waiting',this)">Waiting</button>
+      <button class="filter-btn" onclick="setDashFilter('ready',this)">Ready</button>
+      <button class="filter-btn" onclick="setDashFilter('on_time',this)">On Time</button>
+      <button class="filter-btn" onclick="setDashFilter('almost_done',this)">Almost Done</button>
+      <button class="filter-btn" onclick="setDashFilter('late',this)">Late</button>
+    </div>
+    <div class="ring-grid" id="ringGrid"></div>
+  </div>
+
+  <!-- ═══════════════════════════ CHECK-IN ═══════════════════════════ -->
+  <div id="tab-checkin" class="tab-content">
+    <div class="checkin-controls">
+      <input class="search-box" id="judgeSearch" type="text" placeholder="Search judge by name..." oninput="renderCheckin()">
+      <select class="ring-filter-select" id="ringFilterSelect" onchange="renderCheckin()">
+        <option value="">All Rings</option>
+      </select>
+      <select class="ring-filter-select" id="statusFilterSelect" onchange="renderCheckin()">
+        <option value="">All Judges</option>
+        <option value="out">Not Checked In</option>
+        <option value="in">Checked In</option>
+      </select>
+    </div>
+    <div class="judge-list" id="judgeList"></div>
+  </div>
+
+  <!-- ═══════════════════════════ REPORTS ═══════════════════════════ -->
+  <div id="tab-reports" class="tab-content">
+    <div class="report-grid">
+      <div class="report-card warn" id="reportUnreadyCard">
+        <h3>Rings Not Ready</h3>
+        <div class="report-count" id="reportUnreadyCount">0</div>
+        <div id="reportUnreadyList"></div>
+      </div>
+      <div class="report-card warn" id="reportNoshowCard">
+        <h3>Judges Who Did Not Check In</h3>
+        <div class="report-count" id="reportNoshowCount">0</div>
+        <div id="reportNoshowList"></div>
+      </div>
+      <div class="report-card ok" style="grid-column: span 2" id="reportReadyCard">
+        <h3>Rings Fully Covered</h3>
+        <div class="report-count" id="reportReadyCount">0</div>
+        <div id="reportReadyList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════ SETUP ═══════════════════════════ -->
+  <div id="tab-setup" class="tab-content">
+    <div class="setup-grid">
+
+      <!-- Tournament Settings -->
+      <div class="setup-card">
+        <h3>Tournament Settings</h3>
+        <div class="form-row">
+          <label class="form-label">Tournament Name</label>
+          <input class="form-input" id="setupName" type="text" placeholder="e.g. Spring Open 2026">
+        </div>
+        <div class="form-row">
+          <label class="form-label">Number of Rings</label>
+          <input class="form-input" id="setupRings" type="number" min="1" max="72" placeholder="e.g. 36">
+        </div>
+        <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+      </div>
+
+      <!-- Add Judge -->
+      <div class="setup-card">
+        <h3>Add Single Judge</h3>
+        <div class="form-row">
+          <label class="form-label">Judge Name</label>
+          <input class="form-input" id="addJudgeName" type="text" placeholder="First Last">
+        </div>
+        <div class="form-row">
+          <label class="form-label">Assigned Ring</label>
+          <select class="form-select" id="addJudgeRing">
+            <option value="">-- Select Ring --</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">Role</label>
+          <select class="form-select" id="addJudgeRole">
+            <option value="Center">Center Judge</option>
+            <option value="Corner">Corner Judge</option>
+            <option value="Head">Head Judge</option>
+            <option value="Timekeeper">Timekeeper</option>
+          </select>
+        </div>
+        <button class="btn-primary" onclick="addJudge()">Add Judge</button>
+      </div>
+
+      <!-- Bulk Import -->
+      <div class="setup-card">
+        <h3>Bulk Import Judges</h3>
+        <div class="form-row">
+          <label class="form-label">Paste judge list (one per line)</label>
+          <textarea class="import-area" id="bulkImport" placeholder="Name, Ring, Role&#10;John Smith, 1, Center&#10;Jane Doe, 1, Corner&#10;Bob Lee, 2, Center"></textarea>
+          <div class="help-text">Format: Name, Ring Number, Role (Role is optional)</div>
+        </div>
+        <button class="btn-primary" onclick="bulkImport()">Import Judges</button>
+      </div>
+
+      <!-- Judge List -->
+      <div class="setup-card">
+        <h3>All Judges <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="judgeCountLabel"></span></h3>
+        <div class="judge-setup-list" id="judgeSetupList"></div>
+        <div style="margin-top:14px;display:flex;gap:8px;">
+          <button class="btn-primary" style="background:var(--red);flex:1;" onclick="clearAllJudges()">Clear All Judges</button>
+          <button class="btn-primary" style="background:var(--green);flex:1;" onclick="resetAllCheckIns()">Reset All Check-Ins</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<!-- Ring Status Modal -->
+<div class="overlay" id="ringModal">
+  <div class="modal">
+    <h2 id="modalTitle">Ring 1</h2>
+    <div class="modal-sub" id="modalSub"></div>
+    <div id="modalJudgeList" class="modal-judge-list"></div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:0.85rem;font-weight:700;color:var(--text2);margin-bottom:8px;">Update Ring Status:</div>
+      <div class="modal-status-grid">
+        <button class="modal-status-btn" onclick="setRingStatus('on_time')">On Time</button>
+        <button class="modal-status-btn" onclick="setRingStatus('almost_done')">Almost Done</button>
+        <button class="modal-status-btn" onclick="setRingStatus('late')">Late</button>
+        <button class="modal-status-btn" onclick="setRingStatus('ready')">Reset to Ready</button>
+      </div>
+    </div>
+    <button class="btn-close" onclick="closeModal()">Close</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════
+const STORAGE_KEY = 'tm_state_v1';
+
+function defaultState() {
+  return {
+    name: 'Tournament Manager',
+    ringCount: 36,
+    rings: {},        // ringId -> { manualStatus }
+    judges: [],       // { id, name, ringId, role, checkedIn, checkInTime }
+    nextJudgeId: 1
+  };
+}
+
+let state = loadState();
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return defaultState();
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+// ════════════════════════════════════════════════════════
+//  COMPUTED
+// ════════════════════════════════════════════════════════
+function getRingStatus(ringId) {
+  const assigned = state.judges.filter(j => j.ringId == ringId);
+  if (assigned.length === 0) return 'no_judges';
+  const allIn = assigned.every(j => j.checkedIn);
+  if (!allIn) return 'waiting';
+  const manual = (state.rings[ringId] || {}).manualStatus;
+  return manual || 'ready';
+}
+
+function getRingStatusLabel(s) {
+  return {
+    waiting:     'Waiting for Judges',
+    ready:       'Ready',
+    on_time:     'On Time',
+    almost_done: 'Almost Done',
+    late:        'Late',
+    no_judges:   'No Judges'
+  }[s] || s;
+}
+
+function getStats() {
+  let waiting=0, ready=0, on_time=0, almost_done=0, late=0, no_judges=0;
+  for (let i=1; i<=state.ringCount; i++) {
+    const s = getRingStatus(i);
+    if (s==='waiting')     waiting++;
+    else if (s==='ready')  ready++;
+    else if (s==='on_time') on_time++;
+    else if (s==='almost_done') almost_done++;
+    else if (s==='late')   late++;
+    else if (s==='no_judges') no_judges++;
+  }
+  const checkedIn = state.judges.filter(j=>j.checkedIn).length;
+  return { waiting, ready, on_time, almost_done, late, no_judges, checkedIn, total: state.judges.length };
+}
+
+// ════════════════════════════════════════════════════════
+//  RENDER
+// ════════════════════════════════════════════════════════
+let dashFilter = 'all';
+
+function renderAll() {
+  renderHeader();
+  renderDashboard();
+  renderCheckin();
+  renderReports();
+  renderSetup();
+}
+
+function renderHeader() {
+  document.getElementById('tournamentTitle').textContent = state.name || 'Tournament Manager';
+  const s = getStats();
+  document.getElementById('headerStats').innerHTML = `
+    <div class="hstat"><div class="val">${state.ringCount}</div><div class="lbl">Rings</div></div>
+    <div class="hstat"><div class="val" style="color:#fca5a5">${s.waiting}</div><div class="lbl">Waiting</div></div>
+    <div class="hstat"><div class="val" style="color:#86efac">${s.ready + s.on_time + s.almost_done}</div><div class="lbl">Active</div></div>
+    <div class="hstat"><div class="val" style="color:#fcd34d">${s.late}</div><div class="lbl">Late</div></div>
+    <div class="hstat"><div class="val">${s.checkedIn}/${s.total}</div><div class="lbl">Checked In</div></div>
+  `;
+}
+
+function renderDashboard() {
+  const grid = document.getElementById('ringGrid');
+  let html = '';
+  for (let i = 1; i <= state.ringCount; i++) {
+    const status = getRingStatus(i);
+    if (dashFilter !== 'all' && status !== dashFilter) continue;
+    const assigned = state.judges.filter(j => j.ringId == i);
+    const checkedIn = assigned.filter(j => j.checkedIn).length;
+    const judgeText = assigned.length === 0
+      ? 'No judges assigned'
+      : `${checkedIn}/${assigned.length} judges checked in`;
+    html += `
+      <div class="ring-card s-${status}" onclick="openModal(${i})">
+        <div class="ring-label">Ring</div>
+        <div class="ring-num">${i}</div>
+        <div class="ring-status-badge">${getRingStatusLabel(status)}</div>
+        <div class="ring-judges">${judgeText}</div>
+      </div>`;
+  }
+  if (!html) html = '<div style="color:var(--gray);padding:24px;grid-column:1/-1;">No rings match this filter.</div>';
+  grid.innerHTML = html;
+}
+
+function setDashFilter(f, btn) {
+  dashFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderDashboard();
+}
+
+function renderCheckin() {
+  const search = (document.getElementById('judgeSearch').value || '').toLowerCase();
+  const ringF  = document.getElementById('ringFilterSelect').value;
+  const statF  = document.getElementById('statusFilterSelect').value;
+
+  let judges = [...state.judges].sort((a,b) => {
+    if (a.ringId != b.ringId) return (a.ringId||999) - (b.ringId||999);
+    return a.name.localeCompare(b.name);
+  });
+
+  if (search) judges = judges.filter(j => j.name.toLowerCase().includes(search));
+  if (ringF)  judges = judges.filter(j => j.ringId == ringF);
+  if (statF === 'in')  judges = judges.filter(j => j.checkedIn);
+  if (statF === 'out') judges = judges.filter(j => !j.checkedIn);
+
+  let html = '';
+  if (judges.length === 0) {
+    html = '<div class="empty-state">No judges found.</div>';
+  } else {
+    judges.forEach(j => {
+      const ringLabel = j.ringId ? `Ring ${j.ringId}` : 'Unassigned';
+      const timeLabel = j.checkedIn && j.checkInTime
+        ? `Checked in at ${j.checkInTime}` : '';
+      html += `
+        <div class="judge-row ${j.checkedIn ? 'checked-in' : ''}">
+          <div style="font-size:1.6rem;">${j.checkedIn ? '✅' : '⬜'}</div>
+          <div class="judge-info">
+            <div class="judge-name">${esc(j.name)}</div>
+            <div class="judge-meta">${esc(ringLabel)} &bull; ${esc(j.role||'Judge')}</div>
+            ${timeLabel ? `<div class="judge-time">${esc(timeLabel)}</div>` : ''}
+          </div>
+          ${j.checkedIn
+            ? `<button class="btn-checkin undo" onclick="toggleCheckin(${j.id})">Undo Check-In</button>`
+            : `<button class="btn-checkin in"  onclick="toggleCheckin(${j.id})">Check In</button>`
+          }
+        </div>`;
+    });
+  }
+  document.getElementById('judgeList').innerHTML = html;
+}
+
+function renderReports() {
+  // Unready rings
+  const unready = [];
+  for (let i=1; i<=state.ringCount; i++) {
+    const s = getRingStatus(i);
+    const assigned = state.judges.filter(j => j.ringId == i);
+    const missing = assigned.filter(j => !j.checkedIn);
+    if (s === 'waiting' && assigned.length > 0) {
+      unready.push({ ring: i, missing });
+    }
+    if (s === 'no_judges') {
+      unready.push({ ring: i, missing: [], noJudges: true });
+    }
+  }
+
+  document.getElementById('reportUnreadyCount').textContent = unready.length;
+  let uHtml = '';
+  if (unready.length === 0) {
+    uHtml = '<div class="empty-state">All assigned rings are covered!</div>';
+  } else {
+    unready.forEach(u => {
+      const detail = u.noJudges
+        ? 'No judges assigned'
+        : `Missing: ${u.missing.map(j=>j.name).join(', ')}`;
+      uHtml += `
+        <div class="report-item">
+          <div><div class="ri-name">Ring ${u.ring}</div><div class="ri-sub">${esc(detail)}</div></div>
+          <span class="report-tag ${u.noJudges ? 'tag-missing' : 'tag-partial'}">${u.noJudges ? 'No Judges' : 'Incomplete'}</span>
+        </div>`;
+    });
+  }
+  document.getElementById('reportUnreadyList').innerHTML = uHtml;
+
+  // No-show judges
+  const noshows = state.judges.filter(j => !j.checkedIn);
+  document.getElementById('reportNoshowCount').textContent = noshows.length;
+  let nHtml = '';
+  if (noshows.length === 0) {
+    nHtml = '<div class="empty-state">All judges have checked in!</div>';
+  } else {
+    noshows.forEach(j => {
+      nHtml += `
+        <div class="report-item">
+          <div>
+            <div class="ri-name">${esc(j.name)}</div>
+            <div class="ri-sub">${j.ringId ? `Ring ${j.ringId}` : 'Unassigned'} &bull; ${esc(j.role||'Judge')}</div>
+          </div>
+          <span class="report-tag tag-noshow">No-Show</span>
+        </div>`;
+    });
+  }
+  document.getElementById('reportNoshowList').innerHTML = nHtml;
+
+  // Ready rings
+  const readyRings = [];
+  for (let i=1; i<=state.ringCount; i++) {
+    const s = getRingStatus(i);
+    if (['ready','on_time','almost_done'].includes(s)) readyRings.push({ ring: i, status: s });
+  }
+  document.getElementById('reportReadyCount').textContent = readyRings.length;
+  let rHtml = '';
+  if (readyRings.length === 0) {
+    rHtml = '<div class="empty-state">No rings are fully covered yet.</div>';
+  } else {
+    readyRings.forEach(r => {
+      const assigned = state.judges.filter(j => j.ringId == r.ring);
+      rHtml += `
+        <div class="report-item">
+          <div>
+            <div class="ri-name">Ring ${r.ring}</div>
+            <div class="ri-sub">${assigned.length} judge${assigned.length!==1?'s':''} assigned</div>
+          </div>
+          <span class="report-tag chip-in">${getRingStatusLabel(r.status)}</span>
+        </div>`;
+    });
+  }
+  document.getElementById('reportReadyList').innerHTML = rHtml;
+
+  // Update report-ready card columns
+  const rc = document.getElementById('reportReadyCard');
+  rc.style.gridColumn = window.innerWidth > 700 ? 'span 2' : '';
+}
+
+function renderSetup() {
+  document.getElementById('setupName').value = state.name || '';
+  document.getElementById('setupRings').value = state.ringCount || 36;
+
+  // Rebuild ring dropdowns
+  const opts = ['<option value="">-- Select Ring --</option>'];
+  for (let i=1; i<=state.ringCount; i++) opts.push(`<option value="${i}">Ring ${i}</option>`);
+  document.getElementById('addJudgeRing').innerHTML = opts.join('');
+
+  const rfOpts = ['<option value="">All Rings</option>'];
+  for (let i=1; i<=state.ringCount; i++) rfOpts.push(`<option value="${i}">Ring ${i}</option>`);
+  document.getElementById('ringFilterSelect').innerHTML = rfOpts.join('');
+
+  // Judge list
+  document.getElementById('judgeCountLabel').textContent = `(${state.judges.length})`;
+  const sorted = [...state.judges].sort((a,b) => (a.ringId||999)-(b.ringId||999) || a.name.localeCompare(b.name));
+  let html = '';
+  if (sorted.length === 0) {
+    html = '<div class="empty-state">No judges added yet.</div>';
+  } else {
+    sorted.forEach(j => {
+      html += `
+        <div class="judge-setup-row">
+          <div>
+            <div class="jsr-name">${esc(j.name)}</div>
+            <div class="jsr-meta">${j.ringId ? `Ring ${j.ringId}` : 'Unassigned'} &bull; ${esc(j.role||'Judge')}</div>
+          </div>
+          <button class="btn-danger" onclick="removeJudge(${j.id})" title="Remove">✕</button>
+        </div>`;
+    });
+  }
+  document.getElementById('judgeSetupList').innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════
+//  ACTIONS
+// ════════════════════════════════════════════════════════
+function saveSettings() {
+  const name  = document.getElementById('setupName').value.trim();
+  const rings = parseInt(document.getElementById('setupRings').value);
+  if (!name) return toast('Please enter a tournament name.');
+  if (!rings || rings < 1 || rings > 72) return toast('Ring count must be between 1 and 72.');
+  state.name = name;
+  state.ringCount = rings;
+  saveState();
+  renderAll();
+  toast('Settings saved!');
+}
+
+function addJudge() {
+  const name = document.getElementById('addJudgeName').value.trim();
+  const ring = document.getElementById('addJudgeRing').value;
+  const role = document.getElementById('addJudgeRole').value;
+  if (!name) return toast('Please enter a judge name.');
+  state.judges.push({
+    id: state.nextJudgeId++,
+    name, ringId: ring ? parseInt(ring) : null, role,
+    checkedIn: false, checkInTime: null
+  });
+  document.getElementById('addJudgeName').value = '';
+  saveState(); renderAll();
+  toast(`Added ${name}`);
+}
+
+function removeJudge(id) {
+  state.judges = state.judges.filter(j => j.id !== id);
+  saveState(); renderAll();
+}
+
+function toggleCheckin(id) {
+  const j = state.judges.find(j => j.id === id);
+  if (!j) return;
+  j.checkedIn = !j.checkedIn;
+  j.checkInTime = j.checkedIn ? new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : null;
+  saveState(); renderAll();
+  toast(j.checkedIn ? `${j.name} checked in!` : `${j.name} check-in undone.`);
+}
+
+function clearAllJudges() {
+  if (!confirm('Remove ALL judges? This cannot be undone.')) return;
+  state.judges = [];
+  state.nextJudgeId = 1;
+  saveState(); renderAll();
+  toast('All judges cleared.');
+}
+
+function resetAllCheckIns() {
+  if (!confirm('Reset all check-ins? Judges will need to check in again.')) return;
+  state.judges.forEach(j => { j.checkedIn = false; j.checkInTime = null; });
+  // Also clear manual ring statuses
+  state.rings = {};
+  saveState(); renderAll();
+  toast('All check-ins reset.');
+}
+
+function bulkImport() {
+  const raw = document.getElementById('bulkImport').value.trim();
+  if (!raw) return toast('Paste judge data first.');
+  const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l && !l.toLowerCase().startsWith('name'));
+  let added = 0, skipped = 0;
+  lines.forEach(line => {
+    const parts = line.split(',').map(p=>p.trim());
+    if (parts.length < 2) { skipped++; return; }
+    const name   = parts[0];
+    const ringRaw = parts[1];
+    const role   = parts[2] || 'Corner';
+    const ring   = parseInt(ringRaw);
+    if (!name || isNaN(ring) || ring < 1 || ring > state.ringCount) { skipped++; return; }
+    state.judges.push({
+      id: state.nextJudgeId++,
+      name, ringId: ring, role,
+      checkedIn: false, checkInTime: null
+    });
+    added++;
+  });
+  document.getElementById('bulkImport').value = '';
+  saveState(); renderAll();
+  toast(`Imported ${added} judges${skipped ? `, skipped ${skipped} invalid lines` : ''}.`);
+}
+
+// ════════════════════════════════════════════════════════
+//  RING MODAL
+// ════════════════════════════════════════════════════════
+let modalRingId = null;
+
+function openModal(ringId) {
+  modalRingId = ringId;
+  const status = getRingStatus(ringId);
+  const assigned = state.judges.filter(j => j.ringId == ringId);
+  const checkedIn = assigned.filter(j => j.checkedIn).length;
+
+  document.getElementById('modalTitle').textContent = `Ring ${ringId}`;
+  document.getElementById('modalSub').textContent =
+    `Status: ${getRingStatusLabel(status)} — ${checkedIn}/${assigned.length} judges checked in`;
+
+  let jHtml = '';
+  if (assigned.length === 0) {
+    jHtml = '<div style="color:var(--gray);font-size:0.85rem;padding:8px 0;">No judges assigned to this ring.</div>';
+  } else {
+    assigned.forEach(j => {
+      jHtml += `
+        <div class="modal-judge-row">
+          <div>
+            <div style="font-weight:600;">${esc(j.name)}</div>
+            <div style="font-size:0.78rem;color:var(--gray);">${esc(j.role||'Judge')}</div>
+          </div>
+          <span class="judge-chip ${j.checkedIn ? 'chip-in' : 'chip-out'}">${j.checkedIn ? 'Checked In' : 'Not In'}</span>
+        </div>`;
+    });
+  }
+  document.getElementById('modalJudgeList').innerHTML = jHtml;
+
+  // Highlight current manual status
+  document.querySelectorAll('.modal-status-btn').forEach(b => b.className = 'modal-status-btn');
+  const manual = (state.rings[ringId]||{}).manualStatus;
+  if (manual) {
+    document.querySelectorAll('.modal-status-btn').forEach(b => {
+      if (b.textContent.toLowerCase().replace(/\s+/g,'_') === manual ||
+          (b.textContent === 'On Time' && manual === 'on_time') ||
+          (b.textContent === 'Almost Done' && manual === 'almost_done') ||
+          (b.textContent === 'Late' && manual === 'late') ||
+          (b.textContent === 'Reset to Ready' && manual === 'ready')) {
+        b.classList.add(`sel-${manual}`);
+      }
+    });
+  }
+
+  document.getElementById('ringModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('ringModal').classList.remove('open');
+  modalRingId = null;
+}
+
+function setRingStatus(status) {
+  if (!modalRingId) return;
+  const ringStatus = getRingStatus(modalRingId);
+  if (ringStatus === 'waiting' || ringStatus === 'no_judges') {
+    toast('Cannot set status — ring is still missing judges.');
+    return;
+  }
+  if (!state.rings[modalRingId]) state.rings[modalRingId] = {};
+  state.rings[modalRingId].manualStatus = status === 'ready' ? null : status;
+  saveState(); renderAll();
+  closeModal();
+  toast(`Ring ${modalRingId} marked as ${getRingStatusLabel(status)}.`);
+}
+
+document.getElementById('ringModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  const tabs = ['dashboard','checkin','reports','setup'];
+  document.querySelectorAll('nav button')[tabs.indexOf(name)].classList.add('active');
+  // Re-render active tab to get fresh data
+  if (name==='reports') renderReports();
+  if (name==='checkin') renderCheckin();
+  if (name==='setup')   renderSetup();
+}
+
+// ════════════════════════════════════════════════════════
+//  TOAST
+// ════════════════════════════════════════════════════════
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ════════════════════════════════════════════════════════
+//  UTIL
+// ════════════════════════════════════════════════════════
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ════════════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════════════
+renderAll();
+</script>
+</body>
+</html>

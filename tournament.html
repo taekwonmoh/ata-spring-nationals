@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tournament Manager</title>
+  <title>Tournament Command</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -61,6 +63,47 @@
     .hstat .val { font-size: 1.5rem; font-weight: 800; line-height: 1; }
     .hstat .lbl { font-size: 0.7rem; opacity: 0.8; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
 
+    /* ── Connection status ── */
+    .conn-status {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.75rem; font-weight: 600;
+      padding: 4px 12px; border-radius: 20px;
+      background: rgba(255,255,255,0.1);
+    }
+    .conn-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .conn-dot.online  { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+    .conn-dot.offline { background: #f87171; box-shadow: 0 0 6px #f87171; }
+
+    /* ── Day/Round Selector ── */
+    .day-round-bar {
+      background: white;
+      border-bottom: 2px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .dr-label {
+      font-size: 0.85rem; font-weight: 700; color: var(--text2);
+    }
+    .dr-pills {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .dr-pill {
+      padding: 6px 16px; border-radius: 20px;
+      border: 2px solid var(--border); background: white;
+      font-size: 0.82rem; font-weight: 700; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .dr-pill:hover { border-color: var(--accent); color: var(--accent); }
+    .dr-pill.active { background: var(--accent); border-color: var(--accent); color: white; }
+    .dr-divider {
+      width: 1px; height: 24px; background: var(--border); margin: 0 4px;
+    }
+
     /* ── Nav Tabs ── */
     nav {
       background: white;
@@ -85,14 +128,6 @@
     main { padding: 20px; max-width: 1400px; margin: 0 auto; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-
-    /* ── Section heading ── */
-    .section-title {
-      font-size: 1.2rem; font-weight: 700;
-      margin-bottom: 16px;
-      color: var(--text);
-    }
-    .section-title span { color: var(--gray); font-weight: 400; font-size: 0.9rem; margin-left: 8px; }
 
     /* ── Ring Grid ── */
     .ring-grid {
@@ -257,11 +292,10 @@
       padding: 10px 20px; border-radius: 10px; border: none;
       font-size: 0.9rem; font-weight: 700; cursor: pointer;
       transition: all 0.15s; white-space: nowrap;
+      min-height: 44px; min-width: 120px;
     }
     .btn-checkin.in  { background: var(--green); color: white; }
     .btn-checkin.in:hover  { background: #15803d; }
-    .btn-checkin.out { background: #dc2626; color: white; }
-    .btn-checkin.out:hover { background: #b91c1c; }
     .btn-checkin.undo { background: var(--gray-bg); color: var(--text2); border: 2px solid var(--border); }
     .btn-checkin.undo:hover { background: var(--border); }
 
@@ -313,6 +347,7 @@
       background: var(--accent); color: white;
       font-size: 0.95rem; font-weight: 700; cursor: pointer;
       transition: background 0.15s; width: 100%;
+      min-height: 44px;
     }
     .btn-primary:hover { background: #1e40af; }
     .btn-danger {
@@ -361,23 +396,38 @@
 <!-- Header -->
 <header>
   <div>
-    <div id="tournamentTitle" style="font-size:1.5rem;font-weight:700;">Tournament Manager</div>
+    <div id="tournamentTitle" style="font-size:1.5rem;font-weight:700;">Tournament Command</div>
     <div class="subtitle" id="headerSub">Martial Arts Tournament</div>
   </div>
-  <div class="header-stats" id="headerStats"></div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div class="conn-status" id="connStatus">
+      <div class="conn-dot offline" id="connDot"></div>
+      <span id="connLabel">Connecting...</span>
+    </div>
+    <div class="header-stats" id="headerStats"></div>
+  </div>
 </header>
 
+<!-- Day / Round Selector -->
+<div class="day-round-bar" id="dayRoundBar">
+  <span class="dr-label">Day:</span>
+  <div class="dr-pills" id="dayPills"></div>
+  <div class="dr-divider"></div>
+  <span class="dr-label">Round:</span>
+  <div class="dr-pills" id="roundPills"></div>
+</div>
+
 <!-- Nav -->
-<nav>
+<nav id="navBar">
   <button class="active" onclick="switchTab('dashboard')">Dashboard</button>
   <button onclick="switchTab('checkin')">Judge Check-In</button>
   <button onclick="switchTab('reports')">Reports</button>
-  <button onclick="switchTab('setup')">Setup</button>
+  <button onclick="switchTab('setup')" id="setupTabBtn">Setup</button>
 </nav>
 
 <main>
 
-  <!-- ═══════════════════════════ DASHBOARD ═══════════════════════════ -->
+  <!-- DASHBOARD -->
   <div id="tab-dashboard" class="tab-content active">
     <div class="legend">
       <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Waiting for Judges</div>
@@ -398,7 +448,7 @@
     <div class="ring-grid" id="ringGrid"></div>
   </div>
 
-  <!-- ═══════════════════════════ CHECK-IN ═══════════════════════════ -->
+  <!-- CHECK-IN -->
   <div id="tab-checkin" class="tab-content">
     <div class="checkin-controls">
       <input class="search-box" id="judgeSearch" type="text" placeholder="Search judge by name..." oninput="renderCheckin()">
@@ -414,7 +464,7 @@
     <div class="judge-list" id="judgeList"></div>
   </div>
 
-  <!-- ═══════════════════════════ REPORTS ═══════════════════════════ -->
+  <!-- REPORTS -->
   <div id="tab-reports" class="tab-content">
     <div class="report-grid">
       <div class="report-card warn" id="reportUnreadyCard">
@@ -435,7 +485,7 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════ SETUP ═══════════════════════════ -->
+  <!-- SETUP (admin only) -->
   <div id="tab-setup" class="tab-content">
     <div class="setup-grid">
 
@@ -444,18 +494,26 @@
         <h3>Tournament Settings</h3>
         <div class="form-row">
           <label class="form-label">Tournament Name</label>
-          <input class="form-input" id="setupName" type="text" placeholder="e.g. Spring Open 2026">
+          <input class="form-input" id="setupName" type="text" placeholder="e.g. Spring Nationals 2026">
         </div>
         <div class="form-row">
           <label class="form-label">Number of Rings</label>
           <input class="form-input" id="setupRings" type="number" min="1" max="72" placeholder="e.g. 36">
         </div>
+        <div class="form-row">
+          <label class="form-label">Number of Days</label>
+          <input class="form-input" id="setupDays" type="number" min="1" max="7" placeholder="e.g. 3">
+        </div>
+        <div class="form-row">
+          <label class="form-label">Rounds Per Day</label>
+          <input class="form-input" id="setupRounds" type="number" min="1" max="10" placeholder="e.g. 4">
+        </div>
         <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
 
-      <!-- Add Judge -->
+      <!-- Add Judge (to current day/round) -->
       <div class="setup-card">
-        <h3>Add Single Judge</h3>
+        <h3>Add Judge <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="addJudgeContext"></span></h3>
         <div class="form-row">
           <label class="form-label">Judge Name</label>
           <input class="form-input" id="addJudgeName" type="text" placeholder="First Last">
@@ -478,24 +536,25 @@
         <button class="btn-primary" onclick="addJudge()">Add Judge</button>
       </div>
 
-      <!-- Bulk Import -->
+      <!-- Bulk Import (to current day/round) -->
       <div class="setup-card">
-        <h3>Bulk Import Judges</h3>
+        <h3>Bulk Import Judges <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="bulkImportContext"></span></h3>
         <div class="form-row">
           <label class="form-label">Paste judge list (one per line)</label>
           <textarea class="import-area" id="bulkImport" placeholder="Name, Ring, Role&#10;John Smith, 1, Center&#10;Jane Doe, 1, Corner&#10;Bob Lee, 2, Center"></textarea>
           <div class="help-text">Format: Name, Ring Number, Role (Role is optional)</div>
         </div>
-        <button class="btn-primary" onclick="bulkImport()">Import Judges</button>
+        <button class="btn-primary" onclick="bulkImportJudges()">Import Judges</button>
       </div>
 
-      <!-- Judge List -->
+      <!-- Judge List (current day/round) -->
       <div class="setup-card">
-        <h3>All Judges <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="judgeCountLabel"></span></h3>
+        <h3>Judges <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="judgeCountLabel"></span></h3>
         <div class="judge-setup-list" id="judgeSetupList"></div>
-        <div style="margin-top:14px;display:flex;gap:8px;">
-          <button class="btn-primary" style="background:var(--red);flex:1;" onclick="clearAllJudges()">Clear All Judges</button>
-          <button class="btn-primary" style="background:var(--green);flex:1;" onclick="resetAllCheckIns()">Reset All Check-Ins</button>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-primary" style="background:var(--orange);flex:1;" onclick="copyJudgesToRound()">Copy to Another Round</button>
+          <button class="btn-primary" style="background:var(--green);flex:1;" onclick="resetRoundCheckIns()">Reset Check-Ins</button>
+          <button class="btn-primary" style="background:var(--red);flex:1;" onclick="clearRoundJudges()">Clear Judges</button>
         </div>
       </div>
 
@@ -523,75 +582,213 @@
   </div>
 </div>
 
+<!-- Copy Modal -->
+<div class="overlay" id="copyModal">
+  <div class="modal">
+    <h2>Copy Judges</h2>
+    <div class="modal-sub" id="copySrc"></div>
+    <div class="form-row">
+      <label class="form-label">Copy to:</label>
+      <select class="form-select" id="copyTarget"></select>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn-primary" onclick="executeCopy()">Copy</button>
+      <button class="btn-close" style="width:auto;flex:1;" onclick="closeCopyModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
 <script>
 // ════════════════════════════════════════════════════════
+//  FIREBASE CONFIG
+// ════════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyCWeoBLv8mLn3_rZXYkUcXTqE3JaB6cZvk",
+  authDomain: "ata-tournament-command.firebaseapp.com",
+  databaseURL: "https://ata-tournament-command-default-rtdb.firebaseio.com",
+  projectId: "ata-tournament-command",
+  storageBucket: "ata-tournament-command.firebasestorage.app",
+  messagingSenderId: "1068419626660",
+  appId: "1:1068419626660:web:ca81e36079dbb3f1129831"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const stateRef = db.ref('tournament');
+
+// ════════════════════════════════════════════════════════
+//  ADMIN MODE
+// ════════════════════════════════════════════════════════
+const isAdmin = new URLSearchParams(window.location.search).get('admin') === 'true';
+if (!isAdmin) document.getElementById('setupTabBtn').style.display = 'none';
+
+// ════════════════════════════════════════════════════════
+//  CONNECTION STATUS
+// ════════════════════════════════════════════════════════
+db.ref('.info/connected').on('value', (snap) => {
+  const dot = document.getElementById('connDot');
+  const label = document.getElementById('connLabel');
+  if (snap.val() === true) {
+    dot.className = 'conn-dot online';
+    label.textContent = 'Live';
+  } else {
+    dot.className = 'conn-dot offline';
+    label.textContent = 'Offline';
+  }
+});
+
+// ════════════════════════════════════════════════════════
 //  STATE
 // ════════════════════════════════════════════════════════
-const STORAGE_KEY = 'tm_state_v1';
+//
+// Data model:
+//   state.name, state.ringCount, state.days, state.roundsPerDay
+//   state.rounds["d1_r1"] = { judges: { id: {...} }, rings: { ringId: { manualStatus } }, nextJudgeId }
+//
+// Each day/round combo ("d1_r1", "d2_r3", etc.) has its own independent set of judges, check-ins, and ring statuses.
+
+let currentDay = 1;
+let currentRound = 1;
 
 function defaultState() {
   return {
-    name: 'Tournament Manager',
+    name: 'Tournament Command',
     ringCount: 36,
-    rings: {},        // ringId -> { manualStatus }
-    judges: [],       // { id, name, ringId, role, checkedIn, checkInTime }
+    days: 1,
+    roundsPerDay: 1,
+    rounds: {},
     nextJudgeId: 1
   };
 }
 
-let state = loadState();
+let state = defaultState();
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch(e) {}
-  return defaultState();
+function roundKey(d, r) {
+  return `d${d}_r${r}`;
 }
 
+function currentRoundKey() {
+  return roundKey(currentDay, currentRound);
+}
+
+function getRoundData() {
+  return state.rounds[currentRoundKey()] || { judges: {}, rings: {} };
+}
+
+function getJudgesForRound(d, r) {
+  const rd = state.rounds[roundKey(d, r)];
+  if (!rd || !rd.judges) return [];
+  return Object.values(rd.judges);
+}
+
+function currentJudges() {
+  return getJudgesForRound(currentDay, currentRound);
+}
+
+function currentRings() {
+  const rd = getRoundData();
+  return rd.rings || {};
+}
+
+// ════════════════════════════════════════════════════════
+//  FIREBASE REAL-TIME LISTENER
+// ════════════════════════════════════════════════════════
+stateRef.on('value', (snapshot) => {
+  const data = snapshot.val();
+  if (data) {
+    state = {
+      name: data.name || 'Tournament Command',
+      ringCount: data.ringCount || 36,
+      days: data.days || 1,
+      roundsPerDay: data.roundsPerDay || 1,
+      rounds: data.rounds || {},
+      nextJudgeId: data.nextJudgeId || 1
+    };
+  } else {
+    state = defaultState();
+  }
+  renderDayRoundBar();
+  renderAll();
+});
+
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  stateRef.set(state);
+}
+
+// ════════════════════════════════════════════════════════
+//  DAY / ROUND SELECTOR
+// ════════════════════════════════════════════════════════
+function renderDayRoundBar() {
+  // Days
+  let dHtml = '';
+  for (let d = 1; d <= state.days; d++) {
+    dHtml += `<button class="dr-pill ${d === currentDay ? 'active' : ''}" onclick="selectDay(${d})">Day ${d}</button>`;
+  }
+  document.getElementById('dayPills').innerHTML = dHtml;
+
+  // Rounds
+  let rHtml = '';
+  for (let r = 1; r <= state.roundsPerDay; r++) {
+    rHtml += `<button class="dr-pill ${r === currentRound ? 'active' : ''}" onclick="selectRound(${r})">Round ${r}</button>`;
+  }
+  document.getElementById('roundPills').innerHTML = rHtml;
+}
+
+function selectDay(d) {
+  currentDay = d;
+  currentRound = 1;
+  renderDayRoundBar();
+  renderAll();
+}
+
+function selectRound(r) {
+  currentRound = r;
+  renderDayRoundBar();
+  renderAll();
 }
 
 // ════════════════════════════════════════════════════════
 //  COMPUTED
 // ════════════════════════════════════════════════════════
 function getRingStatus(ringId) {
-  const assigned = state.judges.filter(j => j.ringId == ringId);
+  const judges = currentJudges();
+  const assigned = judges.filter(j => j.ringId == ringId);
   if (assigned.length === 0) return 'no_judges';
   const allIn = assigned.every(j => j.checkedIn);
   if (!allIn) return 'waiting';
-  const manual = (state.rings[ringId] || {}).manualStatus;
+  const rings = currentRings();
+  const manual = (rings[ringId] || {}).manualStatus;
   return manual || 'ready';
 }
 
 function getRingStatusLabel(s) {
   return {
-    waiting:     'Waiting for Judges',
-    ready:       'Ready',
-    on_time:     'On Time',
+    waiting: 'Waiting for Judges',
+    ready: 'Ready',
+    on_time: 'On Time',
     almost_done: 'Almost Done',
-    late:        'Late',
-    no_judges:   'No Judges'
+    late: 'Late',
+    no_judges: 'No Judges'
   }[s] || s;
 }
 
 function getStats() {
+  const judges = currentJudges();
   let waiting=0, ready=0, on_time=0, almost_done=0, late=0, no_judges=0;
   for (let i=1; i<=state.ringCount; i++) {
     const s = getRingStatus(i);
-    if (s==='waiting')     waiting++;
-    else if (s==='ready')  ready++;
+    if (s==='waiting') waiting++;
+    else if (s==='ready') ready++;
     else if (s==='on_time') on_time++;
     else if (s==='almost_done') almost_done++;
-    else if (s==='late')   late++;
+    else if (s==='late') late++;
     else if (s==='no_judges') no_judges++;
   }
-  const checkedIn = state.judges.filter(j=>j.checkedIn).length;
-  return { waiting, ready, on_time, almost_done, late, no_judges, checkedIn, total: state.judges.length };
+  const checkedIn = judges.filter(j=>j.checkedIn).length;
+  return { waiting, ready, on_time, almost_done, late, no_judges, checkedIn, total: judges.length };
 }
 
 // ════════════════════════════════════════════════════════
@@ -604,11 +801,12 @@ function renderAll() {
   renderDashboard();
   renderCheckin();
   renderReports();
-  renderSetup();
+  if (isAdmin) renderSetup();
 }
 
 function renderHeader() {
-  document.getElementById('tournamentTitle').textContent = state.name || 'Tournament Manager';
+  document.getElementById('tournamentTitle').textContent = state.name || 'Tournament Command';
+  document.getElementById('headerSub').textContent = `Day ${currentDay} \u2022 Round ${currentRound}`;
   const s = getStats();
   document.getElementById('headerStats').innerHTML = `
     <div class="hstat"><div class="val">${state.ringCount}</div><div class="lbl">Rings</div></div>
@@ -620,12 +818,13 @@ function renderHeader() {
 }
 
 function renderDashboard() {
+  const judges = currentJudges();
   const grid = document.getElementById('ringGrid');
   let html = '';
   for (let i = 1; i <= state.ringCount; i++) {
     const status = getRingStatus(i);
     if (dashFilter !== 'all' && status !== dashFilter) continue;
-    const assigned = state.judges.filter(j => j.ringId == i);
+    const assigned = judges.filter(j => j.ringId == i);
     const checkedIn = assigned.filter(j => j.checkedIn).length;
     const judgeText = assigned.length === 0
       ? 'No judges assigned'
@@ -654,7 +853,7 @@ function renderCheckin() {
   const ringF  = document.getElementById('ringFilterSelect').value;
   const statF  = document.getElementById('statusFilterSelect').value;
 
-  let judges = [...state.judges].sort((a,b) => {
+  let judges = [...currentJudges()].sort((a,b) => {
     if (a.ringId != b.ringId) return (a.ringId||999) - (b.ringId||999);
     return a.name.localeCompare(b.name);
   });
@@ -666,7 +865,7 @@ function renderCheckin() {
 
   let html = '';
   if (judges.length === 0) {
-    html = '<div class="empty-state">No judges found.</div>';
+    html = '<div class="empty-state">No judges found for this round.</div>';
   } else {
     judges.forEach(j => {
       const ringLabel = j.ringId ? `Ring ${j.ringId}` : 'Unassigned';
@@ -674,7 +873,7 @@ function renderCheckin() {
         ? `Checked in at ${j.checkInTime}` : '';
       html += `
         <div class="judge-row ${j.checkedIn ? 'checked-in' : ''}">
-          <div style="font-size:1.6rem;">${j.checkedIn ? '✅' : '⬜'}</div>
+          <div style="font-size:1.6rem;">${j.checkedIn ? '&#10003;' : '&#9744;'}</div>
           <div class="judge-info">
             <div class="judge-name">${esc(j.name)}</div>
             <div class="judge-meta">${esc(ringLabel)} &bull; ${esc(j.role||'Judge')}</div>
@@ -691,11 +890,13 @@ function renderCheckin() {
 }
 
 function renderReports() {
+  const judges = currentJudges();
+
   // Unready rings
   const unready = [];
   for (let i=1; i<=state.ringCount; i++) {
     const s = getRingStatus(i);
-    const assigned = state.judges.filter(j => j.ringId == i);
+    const assigned = judges.filter(j => j.ringId == i);
     const missing = assigned.filter(j => !j.checkedIn);
     if (s === 'waiting' && assigned.length > 0) {
       unready.push({ ring: i, missing });
@@ -724,7 +925,7 @@ function renderReports() {
   document.getElementById('reportUnreadyList').innerHTML = uHtml;
 
   // No-show judges
-  const noshows = state.judges.filter(j => !j.checkedIn);
+  const noshows = judges.filter(j => !j.checkedIn);
   document.getElementById('reportNoshowCount').textContent = noshows.length;
   let nHtml = '';
   if (noshows.length === 0) {
@@ -755,7 +956,7 @@ function renderReports() {
     rHtml = '<div class="empty-state">No rings are fully covered yet.</div>';
   } else {
     readyRings.forEach(r => {
-      const assigned = state.judges.filter(j => j.ringId == r.ring);
+      const assigned = judges.filter(j => j.ringId == r.ring);
       rHtml += `
         <div class="report-item">
           <div>
@@ -768,7 +969,6 @@ function renderReports() {
   }
   document.getElementById('reportReadyList').innerHTML = rHtml;
 
-  // Update report-ready card columns
   const rc = document.getElementById('reportReadyCard');
   rc.style.gridColumn = window.innerWidth > 700 ? 'span 2' : '';
 }
@@ -776,8 +976,13 @@ function renderReports() {
 function renderSetup() {
   document.getElementById('setupName').value = state.name || '';
   document.getElementById('setupRings').value = state.ringCount || 36;
+  document.getElementById('setupDays').value = state.days || 1;
+  document.getElementById('setupRounds').value = state.roundsPerDay || 1;
 
-  // Rebuild ring dropdowns
+  const ctxLabel = `(Day ${currentDay}, Round ${currentRound})`;
+  document.getElementById('addJudgeContext').textContent = ctxLabel;
+  document.getElementById('bulkImportContext').textContent = ctxLabel;
+
   const opts = ['<option value="">-- Select Ring --</option>'];
   for (let i=1; i<=state.ringCount; i++) opts.push(`<option value="${i}">Ring ${i}</option>`);
   document.getElementById('addJudgeRing').innerHTML = opts.join('');
@@ -786,12 +991,12 @@ function renderSetup() {
   for (let i=1; i<=state.ringCount; i++) rfOpts.push(`<option value="${i}">Ring ${i}</option>`);
   document.getElementById('ringFilterSelect').innerHTML = rfOpts.join('');
 
-  // Judge list
-  document.getElementById('judgeCountLabel').textContent = `(${state.judges.length})`;
-  const sorted = [...state.judges].sort((a,b) => (a.ringId||999)-(b.ringId||999) || a.name.localeCompare(b.name));
+  const judges = currentJudges();
+  document.getElementById('judgeCountLabel').textContent = `(${judges.length} \u2022 Day ${currentDay}, Round ${currentRound})`;
+  const sorted = [...judges].sort((a,b) => (a.ringId||999)-(b.ringId||999) || a.name.localeCompare(b.name));
   let html = '';
   if (sorted.length === 0) {
-    html = '<div class="empty-state">No judges added yet.</div>';
+    html = '<div class="empty-state">No judges added for this round yet.</div>';
   } else {
     sorted.forEach(j => {
       html += `
@@ -800,7 +1005,7 @@ function renderSetup() {
             <div class="jsr-name">${esc(j.name)}</div>
             <div class="jsr-meta">${j.ringId ? `Ring ${j.ringId}` : 'Unassigned'} &bull; ${esc(j.role||'Judge')}</div>
           </div>
-          <button class="btn-danger" onclick="removeJudge(${j.id})" title="Remove">✕</button>
+          <button class="btn-danger" onclick="removeJudge(${j.id})" title="Remove">&#10005;</button>
         </div>`;
     });
   }
@@ -810,88 +1015,174 @@ function renderSetup() {
 // ════════════════════════════════════════════════════════
 //  ACTIONS
 // ════════════════════════════════════════════════════════
+function ensureRoundExists(key) {
+  if (!state.rounds[key]) {
+    state.rounds[key] = { judges: {}, rings: {} };
+  }
+}
+
 function saveSettings() {
-  const name  = document.getElementById('setupName').value.trim();
-  const rings = parseInt(document.getElementById('setupRings').value);
+  if (!isAdmin) return toast('Admin access required.');
+  const name   = document.getElementById('setupName').value.trim();
+  const rings  = parseInt(document.getElementById('setupRings').value);
+  const days   = parseInt(document.getElementById('setupDays').value);
+  const rounds = parseInt(document.getElementById('setupRounds').value);
   if (!name) return toast('Please enter a tournament name.');
-  if (!rings || rings < 1 || rings > 72) return toast('Ring count must be between 1 and 72.');
+  if (!rings || rings < 1 || rings > 72) return toast('Ring count must be 1\u201372.');
+  if (!days || days < 1 || days > 7) return toast('Days must be 1\u20137.');
+  if (!rounds || rounds < 1 || rounds > 10) return toast('Rounds must be 1\u201310.');
   state.name = name;
   state.ringCount = rings;
+  state.days = days;
+  state.roundsPerDay = rounds;
+  // Clamp current selection
+  if (currentDay > days) currentDay = days;
+  if (currentRound > rounds) currentRound = rounds;
   saveState();
-  renderAll();
   toast('Settings saved!');
 }
 
 function addJudge() {
+  if (!isAdmin) return toast('Admin access required.');
   const name = document.getElementById('addJudgeName').value.trim();
   const ring = document.getElementById('addJudgeRing').value;
   const role = document.getElementById('addJudgeRole').value;
   if (!name) return toast('Please enter a judge name.');
-  state.judges.push({
-    id: state.nextJudgeId++,
-    name, ringId: ring ? parseInt(ring) : null, role,
+  const key = currentRoundKey();
+  ensureRoundExists(key);
+  const id = state.nextJudgeId++;
+  state.rounds[key].judges[id] = {
+    id, name, ringId: ring ? parseInt(ring) : null, role,
     checkedIn: false, checkInTime: null
-  });
+  };
   document.getElementById('addJudgeName').value = '';
-  saveState(); renderAll();
+  saveState();
   toast(`Added ${name}`);
 }
 
 function removeJudge(id) {
-  state.judges = state.judges.filter(j => j.id !== id);
-  saveState(); renderAll();
+  if (!isAdmin) return toast('Admin access required.');
+  const key = currentRoundKey();
+  const rd = state.rounds[key];
+  if (rd && rd.judges) delete rd.judges[id];
+  saveState();
 }
 
 function toggleCheckin(id) {
-  const j = state.judges.find(j => j.id === id);
-  if (!j) return;
+  const key = currentRoundKey();
+  const rd = state.rounds[key];
+  if (!rd || !rd.judges || !rd.judges[id]) return;
+  const j = rd.judges[id];
   j.checkedIn = !j.checkedIn;
   j.checkInTime = j.checkedIn ? new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : null;
-  saveState(); renderAll();
+  saveState();
   toast(j.checkedIn ? `${j.name} checked in!` : `${j.name} check-in undone.`);
 }
 
-function clearAllJudges() {
-  if (!confirm('Remove ALL judges? This cannot be undone.')) return;
-  state.judges = [];
-  state.nextJudgeId = 1;
-  saveState(); renderAll();
-  toast('All judges cleared.');
+function clearRoundJudges() {
+  if (!isAdmin) return toast('Admin access required.');
+  if (!confirm(`Clear ALL judges for Day ${currentDay}, Round ${currentRound}?`)) return;
+  if (!confirm('Are you REALLY sure? This cannot be undone.')) return;
+  const key = currentRoundKey();
+  if (state.rounds[key]) {
+    state.rounds[key].judges = {};
+  }
+  saveState();
+  toast(`Judges cleared for Day ${currentDay}, Round ${currentRound}.`);
 }
 
-function resetAllCheckIns() {
-  if (!confirm('Reset all check-ins? Judges will need to check in again.')) return;
-  state.judges.forEach(j => { j.checkedIn = false; j.checkInTime = null; });
-  // Also clear manual ring statuses
-  state.rings = {};
-  saveState(); renderAll();
-  toast('All check-ins reset.');
+function resetRoundCheckIns() {
+  if (!isAdmin) return toast('Admin access required.');
+  if (!confirm(`Reset all check-ins for Day ${currentDay}, Round ${currentRound}?`)) return;
+  const key = currentRoundKey();
+  const rd = state.rounds[key];
+  if (rd && rd.judges) {
+    Object.values(rd.judges).forEach(j => { j.checkedIn = false; j.checkInTime = null; });
+  }
+  if (rd) rd.rings = {};
+  saveState();
+  toast(`Check-ins reset for Day ${currentDay}, Round ${currentRound}.`);
 }
 
-function bulkImport() {
+function bulkImportJudges() {
+  if (!isAdmin) return toast('Admin access required.');
   const raw = document.getElementById('bulkImport').value.trim();
   if (!raw) return toast('Paste judge data first.');
   const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l && !l.toLowerCase().startsWith('name'));
+  const key = currentRoundKey();
+  ensureRoundExists(key);
   let added = 0, skipped = 0;
   lines.forEach(line => {
     const parts = line.split(',').map(p=>p.trim());
     if (parts.length < 2) { skipped++; return; }
-    const name   = parts[0];
+    const name    = parts[0];
     const ringRaw = parts[1];
-    const role   = parts[2] || 'Corner';
-    const ring   = parseInt(ringRaw);
+    const role    = parts[2] || 'Corner';
+    const ring    = parseInt(ringRaw);
     if (!name || isNaN(ring) || ring < 1 || ring > state.ringCount) { skipped++; return; }
-    state.judges.push({
-      id: state.nextJudgeId++,
-      name, ringId: ring, role,
+    const id = state.nextJudgeId++;
+    state.rounds[key].judges[id] = {
+      id, name, ringId: ring, role,
       checkedIn: false, checkInTime: null
-    });
+    };
     added++;
   });
   document.getElementById('bulkImport').value = '';
-  saveState(); renderAll();
+  saveState();
   toast(`Imported ${added} judges${skipped ? `, skipped ${skipped} invalid lines` : ''}.`);
 }
+
+// ════════════════════════════════════════════════════════
+//  COPY JUDGES TO ANOTHER ROUND
+// ════════════════════════════════════════════════════════
+function copyJudgesToRound() {
+  if (!isAdmin) return toast('Admin access required.');
+  const judges = currentJudges();
+  if (judges.length === 0) return toast('No judges to copy.');
+
+  document.getElementById('copySrc').textContent = `From: Day ${currentDay}, Round ${currentRound} (${judges.length} judges)`;
+
+  // Build target options
+  let optHtml = '';
+  for (let d = 1; d <= state.days; d++) {
+    for (let r = 1; r <= state.roundsPerDay; r++) {
+      if (d === currentDay && r === currentRound) continue;
+      const existing = getJudgesForRound(d, r).length;
+      optHtml += `<option value="${roundKey(d,r)}">Day ${d}, Round ${r}${existing ? ` (${existing} judges)` : ' (empty)'}</option>`;
+    }
+  }
+  if (!optHtml) return toast('No other rounds to copy to.');
+  document.getElementById('copyTarget').innerHTML = optHtml;
+  document.getElementById('copyModal').classList.add('open');
+}
+
+function closeCopyModal() {
+  document.getElementById('copyModal').classList.remove('open');
+}
+
+function executeCopy() {
+  const targetKey = document.getElementById('copyTarget').value;
+  if (!targetKey) return;
+  const judges = currentJudges();
+  ensureRoundExists(targetKey);
+  const existing = Object.keys(state.rounds[targetKey].judges || {}).length;
+  if (existing > 0 && !confirm(`Target round already has ${existing} judges. Add ${judges.length} more?`)) return;
+
+  judges.forEach(j => {
+    const id = state.nextJudgeId++;
+    state.rounds[targetKey].judges[id] = {
+      id, name: j.name, ringId: j.ringId, role: j.role,
+      checkedIn: false, checkInTime: null
+    };
+  });
+  saveState();
+  closeCopyModal();
+  toast(`Copied ${judges.length} judges to ${targetKey.replace('d','Day ').replace('_r',', Round ')}.`);
+}
+
+document.getElementById('copyModal').addEventListener('click', function(e) {
+  if (e.target === this) closeCopyModal();
+});
 
 // ════════════════════════════════════════════════════════
 //  RING MODAL
@@ -901,12 +1192,13 @@ let modalRingId = null;
 function openModal(ringId) {
   modalRingId = ringId;
   const status = getRingStatus(ringId);
-  const assigned = state.judges.filter(j => j.ringId == ringId);
+  const judges = currentJudges();
+  const assigned = judges.filter(j => j.ringId == ringId);
   const checkedIn = assigned.filter(j => j.checkedIn).length;
 
   document.getElementById('modalTitle').textContent = `Ring ${ringId}`;
   document.getElementById('modalSub').textContent =
-    `Status: ${getRingStatusLabel(status)} — ${checkedIn}/${assigned.length} judges checked in`;
+    `Day ${currentDay}, Round ${currentRound} \u2014 ${getRingStatusLabel(status)} \u2014 ${checkedIn}/${assigned.length} judges`;
 
   let jHtml = '';
   if (assigned.length === 0) {
@@ -925,13 +1217,12 @@ function openModal(ringId) {
   }
   document.getElementById('modalJudgeList').innerHTML = jHtml;
 
-  // Highlight current manual status
   document.querySelectorAll('.modal-status-btn').forEach(b => b.className = 'modal-status-btn');
-  const manual = (state.rings[ringId]||{}).manualStatus;
+  const rings = currentRings();
+  const manual = (rings[ringId]||{}).manualStatus;
   if (manual) {
     document.querySelectorAll('.modal-status-btn').forEach(b => {
-      if (b.textContent.toLowerCase().replace(/\s+/g,'_') === manual ||
-          (b.textContent === 'On Time' && manual === 'on_time') ||
+      if ((b.textContent === 'On Time' && manual === 'on_time') ||
           (b.textContent === 'Almost Done' && manual === 'almost_done') ||
           (b.textContent === 'Late' && manual === 'late') ||
           (b.textContent === 'Reset to Ready' && manual === 'ready')) {
@@ -952,12 +1243,15 @@ function setRingStatus(status) {
   if (!modalRingId) return;
   const ringStatus = getRingStatus(modalRingId);
   if (ringStatus === 'waiting' || ringStatus === 'no_judges') {
-    toast('Cannot set status — ring is still missing judges.');
+    toast('Cannot set status \u2014 ring is still missing judges.');
     return;
   }
-  if (!state.rings[modalRingId]) state.rings[modalRingId] = {};
-  state.rings[modalRingId].manualStatus = status === 'ready' ? null : status;
-  saveState(); renderAll();
+  const key = currentRoundKey();
+  ensureRoundExists(key);
+  if (!state.rounds[key].rings) state.rounds[key].rings = {};
+  if (!state.rounds[key].rings[modalRingId]) state.rounds[key].rings[modalRingId] = {};
+  state.rounds[key].rings[modalRingId].manualStatus = status === 'ready' ? null : status;
+  saveState();
   closeModal();
   toast(`Ring ${modalRingId} marked as ${getRingStatusLabel(status)}.`);
 }
@@ -970,19 +1264,22 @@ document.getElementById('ringModal').addEventListener('click', function(e) {
 //  TABS
 // ════════════════════════════════════════════════════════
 function switchTab(name) {
+  if (name === 'setup' && !isAdmin) {
+    toast('Admin access required. Add ?admin=true to the URL.');
+    return;
+  }
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   const tabs = ['dashboard','checkin','reports','setup'];
   document.querySelectorAll('nav button')[tabs.indexOf(name)].classList.add('active');
-  // Re-render active tab to get fresh data
   if (name==='reports') renderReports();
   if (name==='checkin') renderCheckin();
   if (name==='setup')   renderSetup();
 }
 
 // ════════════════════════════════════════════════════════
-//  TOAST
+//  TOAST & UTIL
 // ════════════════════════════════════════════════════════
 let toastTimer;
 function toast(msg) {
@@ -993,9 +1290,6 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
 }
 
-// ════════════════════════════════════════════════════════
-//  UTIL
-// ════════════════════════════════════════════════════════
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -1003,6 +1297,7 @@ function esc(s) {
 // ════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════
+renderDayRoundBar();
 renderAll();
 </script>
 </body>

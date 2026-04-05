@@ -159,6 +159,12 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    .ring-card .ring-event {
+      font-size: 0.68rem; color: var(--text2); margin-top: 6px;
+      font-weight: 700; line-height: 1.2;
+      overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
     .ring-card .ring-judges { font-size: 0.75rem; color: var(--gray); margin-top: 6px; }
 
     /* status colors */
@@ -536,15 +542,16 @@
         <button class="btn-primary" onclick="addJudge()">Add Judge</button>
       </div>
 
-      <!-- Bulk Import (to current day/round) -->
-      <div class="setup-card">
-        <h3>Bulk Import Judges <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="bulkImportContext"></span></h3>
+      <!-- CSV Import (to current day/round) -->
+      <div class="setup-card" style="grid-column: span 2;">
+        <h3>Import Ring Sheet (CSV) <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="csvImportContext"></span></h3>
         <div class="form-row">
-          <label class="form-label">Paste judge list (one per line)</label>
-          <textarea class="import-area" id="bulkImport" placeholder="Name, Ring, Role&#10;John Smith, 1, Center&#10;Jane Doe, 1, Corner&#10;Bob Lee, 2, Center"></textarea>
-          <div class="help-text">Format: Name, Ring Number, Role (Role is optional)</div>
+          <label class="form-label">Upload CSV file or paste CSV data</label>
+          <input type="file" id="csvFileInput" accept=".csv" style="margin-bottom:8px;" onchange="handleCsvFile(event)">
+          <textarea class="import-area" id="bulkImport" placeholder="Paste CSV data here... Format:&#10;,RING #01,ELITE- TEAM SPARRING,&quot;SMITH, JOHN&quot;,&quot;DOE, JANE&quot;,&quot;LEE, BOB&quot;"></textarea>
+          <div class="help-text">ATA format: Column B = Ring #, Column C = Event name, Columns D/E/F = Judge 1/2/3. Rows with "OPEN" judges are skipped.</div>
         </div>
-        <button class="btn-primary" onclick="bulkImportJudges()">Import Judges</button>
+        <button class="btn-primary" onclick="importCsvSheet()">Import Ring Sheet</button>
       </div>
 
       <!-- Judge List (current day/round) -->
@@ -675,7 +682,7 @@ function currentRoundKey() {
 }
 
 function getRoundData() {
-  return state.rounds[currentRoundKey()] || { judges: {}, rings: {} };
+  return state.rounds[currentRoundKey()] || { judges: {}, rings: {}, events: {} };
 }
 
 function getJudgesForRound(d, r) {
@@ -691,6 +698,11 @@ function currentJudges() {
 function currentRings() {
   const rd = getRoundData();
   return rd.rings || {};
+}
+
+function currentEvents() {
+  const rd = getRoundData();
+  return rd.events || {};
 }
 
 // ════════════════════════════════════════════════════════
@@ -819,6 +831,7 @@ function renderHeader() {
 
 function renderDashboard() {
   const judges = currentJudges();
+  const events = currentEvents();
   const grid = document.getElementById('ringGrid');
   let html = '';
   for (let i = 1; i <= state.ringCount; i++) {
@@ -829,10 +842,12 @@ function renderDashboard() {
     const judgeText = assigned.length === 0
       ? 'No judges assigned'
       : `${checkedIn}/${assigned.length} judges checked in`;
+    const eventName = events[i] || '';
     html += `
       <div class="ring-card s-${status}" onclick="openModal(${i})">
         <div class="ring-label">Ring</div>
         <div class="ring-num">${i}</div>
+        ${eventName ? `<div class="ring-event">${esc(eventName)}</div>` : ''}
         <div class="ring-status-badge">${getRingStatusLabel(status)}</div>
         <div class="ring-judges">${judgeText}</div>
       </div>`;
@@ -981,7 +996,7 @@ function renderSetup() {
 
   const ctxLabel = `(Day ${currentDay}, Round ${currentRound})`;
   document.getElementById('addJudgeContext').textContent = ctxLabel;
-  document.getElementById('bulkImportContext').textContent = ctxLabel;
+  document.getElementById('csvImportContext').textContent = ctxLabel;
 
   const opts = ['<option value="">-- Select Ring --</option>'];
   for (let i=1; i<=state.ringCount; i++) opts.push(`<option value="${i}">Ring ${i}</option>`);
@@ -1017,7 +1032,7 @@ function renderSetup() {
 // ════════════════════════════════════════════════════════
 function ensureRoundExists(key) {
   if (!state.rounds[key]) {
-    state.rounds[key] = { judges: {}, rings: {} };
+    state.rounds[key] = { judges: {}, rings: {}, events: {} };
   }
 }
 
@@ -1104,32 +1119,104 @@ function resetRoundCheckIns() {
   toast(`Check-ins reset for Day ${currentDay}, Round ${currentRound}.`);
 }
 
-function bulkImportJudges() {
+// ════════════════════════════════════════════════════════
+//  CSV IMPORT (ATA Ring Sheet format)
+// ════════════════════════════════════════════════════════
+function handleCsvFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('bulkImport').value = e.target.result;
+  };
+  reader.readAsText(file);
+}
+
+function parseCsvLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function importCsvSheet() {
   if (!isAdmin) return toast('Admin access required.');
   const raw = document.getElementById('bulkImport').value.trim();
-  if (!raw) return toast('Paste judge data first.');
-  const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l && !l.toLowerCase().startsWith('name'));
+  if (!raw) return toast('Paste or upload CSV data first.');
+  const lines = raw.split('\n');
   const key = currentRoundKey();
   ensureRoundExists(key);
-  let added = 0, skipped = 0;
+  if (!state.rounds[key].events) state.rounds[key].events = {};
+
+  let addedJudges = 0, addedRings = 0, maxRing = 0;
+
   lines.forEach(line => {
-    const parts = line.split(',').map(p=>p.trim());
-    if (parts.length < 2) { skipped++; return; }
-    const name    = parts[0];
-    const ringRaw = parts[1];
-    const role    = parts[2] || 'Corner';
-    const ring    = parseInt(ringRaw);
-    if (!name || isNaN(ring) || ring < 1 || ring > state.ringCount) { skipped++; return; }
-    const id = state.nextJudgeId++;
-    state.rounds[key].judges[id] = {
-      id, name, ringId: ring, role,
-      checkedIn: false, checkInTime: null
-    };
-    added++;
+    const cols = parseCsvLine(line);
+    // Find ring column — look for "RING #XX" pattern
+    let ringNum = null;
+    let ringColIdx = -1;
+    for (let i = 0; i < cols.length; i++) {
+      const match = cols[i].match(/RING\s*#?(\d+)/i);
+      if (match) {
+        ringNum = parseInt(match[1]);
+        ringColIdx = i;
+        break;
+      }
+    }
+    if (ringNum === null || ringColIdx < 0) return;
+    if (ringNum > maxRing) maxRing = ringNum;
+
+    // Event name is the next column after ring
+    const eventCol = cols[ringColIdx + 1] || '';
+    // Judges are the next 3 columns after event
+    const judge1 = cols[ringColIdx + 2] || '';
+    const judge2 = cols[ringColIdx + 3] || '';
+    const judge3 = cols[ringColIdx + 4] || '';
+
+    // Skip rows where all judges are "OPEN" or empty
+    const allOpen = [judge1, judge2, judge3].every(j => !j || j.toUpperCase() === 'OPEN');
+    if (allOpen) return;
+
+    // Store event name
+    if (eventCol && eventCol.toUpperCase() !== 'OPEN') {
+      state.rounds[key].events[ringNum] = eventCol;
+      addedRings++;
+    }
+
+    // Add judges (skip empty or "OPEN")
+    [judge1, judge2, judge3].forEach((name, idx) => {
+      if (!name || name.toUpperCase() === 'OPEN') return;
+      const id = state.nextJudgeId++;
+      const role = idx === 0 ? 'Judge 1' : idx === 1 ? 'Judge 2' : 'Judge 3';
+      state.rounds[key].judges[id] = {
+        id, name, ringId: ringNum, role,
+        checkedIn: false, checkInTime: null
+      };
+      addedJudges++;
+    });
   });
+
+  // Auto-expand ring count if CSV has more rings
+  if (maxRing > state.ringCount) {
+    state.ringCount = maxRing;
+  }
+
   document.getElementById('bulkImport').value = '';
+  document.getElementById('csvFileInput').value = '';
   saveState();
-  toast(`Imported ${added} judges${skipped ? `, skipped ${skipped} invalid lines` : ''}.`);
+  toast(`Imported ${addedJudges} judges across ${addedRings} rings.`);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1175,6 +1262,12 @@ function executeCopy() {
       checkedIn: false, checkInTime: null
     };
   });
+  // Also copy events
+  const srcEvents = (state.rounds[currentRoundKey()] || {}).events || {};
+  if (Object.keys(srcEvents).length > 0) {
+    if (!state.rounds[targetKey].events) state.rounds[targetKey].events = {};
+    Object.assign(state.rounds[targetKey].events, srcEvents);
+  }
   saveState();
   closeCopyModal();
   toast(`Copied ${judges.length} judges to ${targetKey.replace('d','Day ').replace('_r',', Round ')}.`);
@@ -1196,9 +1289,11 @@ function openModal(ringId) {
   const assigned = judges.filter(j => j.ringId == ringId);
   const checkedIn = assigned.filter(j => j.checkedIn).length;
 
+  const events = currentEvents();
+  const eventName = events[ringId] || '';
   document.getElementById('modalTitle').textContent = `Ring ${ringId}`;
   document.getElementById('modalSub').textContent =
-    `Day ${currentDay}, Round ${currentRound} \u2014 ${getRingStatusLabel(status)} \u2014 ${checkedIn}/${assigned.length} judges`;
+    (eventName ? eventName + ' \u2014 ' : '') + `Day ${currentDay}, Round ${currentRound} \u2014 ${getRingStatusLabel(status)} \u2014 ${checkedIn}/${assigned.length} judges`;
 
   let jHtml = '';
   if (assigned.length === 0) {

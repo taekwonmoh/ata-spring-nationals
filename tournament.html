@@ -708,6 +708,16 @@ function currentEvents() {
 // ════════════════════════════════════════════════════════
 //  FIREBASE REAL-TIME LISTENER
 // ════════════════════════════════════════════════════════
+let renderTimer = null;
+function debouncedRender() {
+  if (renderTimer) cancelAnimationFrame(renderTimer);
+  renderTimer = requestAnimationFrame(() => {
+    renderDayRoundBar();
+    renderAll();
+    renderTimer = null;
+  });
+}
+
 stateRef.on('value', (snapshot) => {
   const data = snapshot.val();
   if (data) {
@@ -722,12 +732,38 @@ stateRef.on('value', (snapshot) => {
   } else {
     state = defaultState();
   }
-  renderDayRoundBar();
-  renderAll();
+  debouncedRender();
 });
 
 function saveState() {
   stateRef.set(state);
+}
+
+// Granular Firebase writes — only touch what changed
+function fbUpdateJudge(roundK, judgeId, judgeData) {
+  db.ref(`tournament/rounds/${roundK}/judges/${judgeId}`).set(judgeData);
+}
+
+function fbRemoveJudge(roundK, judgeId) {
+  db.ref(`tournament/rounds/${roundK}/judges/${judgeId}`).remove();
+}
+
+function fbUpdateRingStatus(roundK, ringId, statusData) {
+  db.ref(`tournament/rounds/${roundK}/rings/${ringId}`).set(statusData);
+}
+
+function fbUpdateSettings(updates) {
+  stateRef.update(updates);
+}
+
+function fbAllocateIds(count) {
+  // Use transaction to safely increment nextJudgeId
+  return db.ref('tournament/nextJudgeId').transaction((current) => {
+    return (current || 1) + count;
+  }).then((result) => {
+    // Returns the starting ID (before increment)
+    return result.snapshot.val() - count;
+  });
 }
 
 // ════════════════════════════════════════════════════════
@@ -1046,14 +1082,9 @@ function saveSettings() {
   if (!rings || rings < 1 || rings > 72) return toast('Ring count must be 1\u201372.');
   if (!days || days < 1 || days > 7) return toast('Days must be 1\u20137.');
   if (!rounds || rounds < 1 || rounds > 10) return toast('Rounds must be 1\u201310.');
-  state.name = name;
-  state.ringCount = rings;
-  state.days = days;
-  state.roundsPerDay = rounds;
-  // Clamp current selection
   if (currentDay > days) currentDay = days;
   if (currentRound > rounds) currentRound = rounds;
-  saveState();
+  fbUpdateSettings({ name, ringCount: rings, days, roundsPerDay: rounds });
   toast('Settings saved!');
 }
 
@@ -1064,23 +1095,22 @@ function addJudge() {
   const role = document.getElementById('addJudgeRole').value;
   if (!name) return toast('Please enter a judge name.');
   const key = currentRoundKey();
-  ensureRoundExists(key);
-  const id = state.nextJudgeId++;
-  state.rounds[key].judges[id] = {
-    id, name, ringId: ring ? parseInt(ring) : null, role,
-    checkedIn: false, checkInTime: null
-  };
+  // Transaction-safe ID allocation
+  fbAllocateIds(1).then(startId => {
+    const id = startId;
+    db.ref(`tournament/rounds/${key}/judges/${id}`).set({
+      id, name, ringId: ring ? parseInt(ring) : null, role,
+      checkedIn: false, checkInTime: null
+    });
+    toast(`Added ${name}`);
+  });
   document.getElementById('addJudgeName').value = '';
-  saveState();
-  toast(`Added ${name}`);
 }
 
 function removeJudge(id) {
   if (!isAdmin) return toast('Admin access required.');
   const key = currentRoundKey();
-  const rd = state.rounds[key];
-  if (rd && rd.judges) delete rd.judges[id];
-  saveState();
+  fbRemoveJudge(key, id);
 }
 
 function toggleCheckin(id) {
@@ -1088,10 +1118,14 @@ function toggleCheckin(id) {
   const rd = state.rounds[key];
   if (!rd || !rd.judges || !rd.judges[id]) return;
   const j = rd.judges[id];
-  j.checkedIn = !j.checkedIn;
-  j.checkInTime = j.checkedIn ? new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : null;
-  saveState();
-  toast(j.checkedIn ? `${j.name} checked in!` : `${j.name} check-in undone.`);
+  const newCheckedIn = !j.checkedIn;
+  const newTime = newCheckedIn ? new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : null;
+  // Granular write — only update this one judge's check-in fields
+  db.ref(`tournament/rounds/${key}/judges/${id}`).update({
+    checkedIn: newCheckedIn,
+    checkInTime: newTime
+  });
+  toast(newCheckedIn ? `${j.name} checked in!` : `${j.name} check-in undone.`);
 }
 
 function clearRoundJudges() {
@@ -1099,10 +1133,8 @@ function clearRoundJudges() {
   if (!confirm(`Clear ALL judges for Day ${currentDay}, Round ${currentRound}?`)) return;
   if (!confirm('Are you REALLY sure? This cannot be undone.')) return;
   const key = currentRoundKey();
-  if (state.rounds[key]) {
-    state.rounds[key].judges = {};
-  }
-  saveState();
+  db.ref(`tournament/rounds/${key}/judges`).remove();
+  db.ref(`tournament/rounds/${key}/events`).remove();
   toast(`Judges cleared for Day ${currentDay}, Round ${currentRound}.`);
 }
 
@@ -1112,10 +1144,14 @@ function resetRoundCheckIns() {
   const key = currentRoundKey();
   const rd = state.rounds[key];
   if (rd && rd.judges) {
-    Object.values(rd.judges).forEach(j => { j.checkedIn = false; j.checkInTime = null; });
+    const updates = {};
+    Object.keys(rd.judges).forEach(id => {
+      updates[`tournament/rounds/${key}/judges/${id}/checkedIn`] = false;
+      updates[`tournament/rounds/${key}/judges/${id}/checkInTime`] = null;
+    });
+    updates[`tournament/rounds/${key}/rings`] = null;
+    db.ref().update(updates);
   }
-  if (rd) rd.rings = {};
-  saveState();
   toast(`Check-ins reset for Day ${currentDay}, Round ${currentRound}.`);
 }
 
@@ -1157,14 +1193,14 @@ function importCsvSheet() {
   if (!raw) return toast('Paste or upload CSV data first.');
   const lines = raw.split('\n');
   const key = currentRoundKey();
-  ensureRoundExists(key);
-  if (!state.rounds[key].events) state.rounds[key].events = {};
 
-  let addedJudges = 0, addedRings = 0, maxRing = 0;
+  // First pass: collect all judges and events to add
+  const pendingJudges = [];
+  const pendingEvents = {};
+  let maxRing = 0;
 
   lines.forEach(line => {
     const cols = parseCsvLine(line);
-    // Find ring column — look for "RING #XX" pattern
     let ringNum = null;
     let ringColIdx = -1;
     for (let i = 0; i < cols.length; i++) {
@@ -1178,45 +1214,49 @@ function importCsvSheet() {
     if (ringNum === null || ringColIdx < 0) return;
     if (ringNum > maxRing) maxRing = ringNum;
 
-    // Event name is the next column after ring
     const eventCol = cols[ringColIdx + 1] || '';
-    // Judges are the next 3 columns after event
     const judge1 = cols[ringColIdx + 2] || '';
     const judge2 = cols[ringColIdx + 3] || '';
     const judge3 = cols[ringColIdx + 4] || '';
 
-    // Skip rows where all judges are "OPEN" or empty
     const allOpen = [judge1, judge2, judge3].every(j => !j || j.toUpperCase() === 'OPEN');
     if (allOpen) return;
 
-    // Store event name
     if (eventCol && eventCol.toUpperCase() !== 'OPEN') {
-      state.rounds[key].events[ringNum] = eventCol;
-      addedRings++;
+      pendingEvents[ringNum] = eventCol;
     }
 
-    // Add judges (skip empty or "OPEN")
     [judge1, judge2, judge3].forEach((name, idx) => {
       if (!name || name.toUpperCase() === 'OPEN') return;
-      const id = state.nextJudgeId++;
       const role = idx === 0 ? 'Judge 1' : idx === 1 ? 'Judge 2' : 'Judge 3';
-      state.rounds[key].judges[id] = {
-        id, name, ringId: ringNum, role,
-        checkedIn: false, checkInTime: null
-      };
-      addedJudges++;
+      pendingJudges.push({ name, ringId: ringNum, role });
     });
   });
 
-  // Auto-expand ring count if CSV has more rings
-  if (maxRing > state.ringCount) {
-    state.ringCount = maxRing;
-  }
+  if (pendingJudges.length === 0) return toast('No judges found in CSV.');
+
+  // Transaction-safe ID allocation, then batch write
+  fbAllocateIds(pendingJudges.length).then(startId => {
+    const updates = {};
+    pendingJudges.forEach((j, idx) => {
+      const id = startId + idx;
+      updates[`tournament/rounds/${key}/judges/${id}`] = {
+        id, name: j.name, ringId: j.ringId, role: j.role,
+        checkedIn: false, checkInTime: null
+      };
+    });
+    Object.entries(pendingEvents).forEach(([ringId, eventName]) => {
+      updates[`tournament/rounds/${key}/events/${ringId}`] = eventName;
+    });
+    if (maxRing > state.ringCount) {
+      updates['tournament/ringCount'] = maxRing;
+    }
+    db.ref().update(updates);
+    toast(`Imported ${pendingJudges.length} judges across ${Object.keys(pendingEvents).length} rings.`);
+  });
 
   document.getElementById('bulkImport').value = '';
   document.getElementById('csvFileInput').value = '';
-  saveState();
-  toast(`Imported ${addedJudges} judges across ${addedRings} rings.`);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1251,26 +1291,30 @@ function executeCopy() {
   const targetKey = document.getElementById('copyTarget').value;
   if (!targetKey) return;
   const judges = currentJudges();
-  ensureRoundExists(targetKey);
-  const existing = Object.keys(state.rounds[targetKey].judges || {}).length;
+  const existing = getJudgesForRound(
+    parseInt(targetKey.match(/d(\d+)/)[1]),
+    parseInt(targetKey.match(/r(\d+)/)[1])
+  ).length;
   if (existing > 0 && !confirm(`Target round already has ${existing} judges. Add ${judges.length} more?`)) return;
 
-  judges.forEach(j => {
-    const id = state.nextJudgeId++;
-    state.rounds[targetKey].judges[id] = {
-      id, name: j.name, ringId: j.ringId, role: j.role,
-      checkedIn: false, checkInTime: null
-    };
+  fbAllocateIds(judges.length).then(startId => {
+    const updates = {};
+    judges.forEach((j, idx) => {
+      const id = startId + idx;
+      updates[`tournament/rounds/${targetKey}/judges/${id}`] = {
+        id, name: j.name, ringId: j.ringId, role: j.role,
+        checkedIn: false, checkInTime: null
+      };
+    });
+    // Also copy events
+    const srcEvents = (state.rounds[currentRoundKey()] || {}).events || {};
+    Object.entries(srcEvents).forEach(([ringId, eventName]) => {
+      updates[`tournament/rounds/${targetKey}/events/${ringId}`] = eventName;
+    });
+    db.ref().update(updates);
+    toast(`Copied ${judges.length} judges to ${targetKey.replace('d','Day ').replace('_r',', Round ')}.`);
   });
-  // Also copy events
-  const srcEvents = (state.rounds[currentRoundKey()] || {}).events || {};
-  if (Object.keys(srcEvents).length > 0) {
-    if (!state.rounds[targetKey].events) state.rounds[targetKey].events = {};
-    Object.assign(state.rounds[targetKey].events, srcEvents);
-  }
-  saveState();
   closeCopyModal();
-  toast(`Copied ${judges.length} judges to ${targetKey.replace('d','Day ').replace('_r',', Round ')}.`);
 }
 
 document.getElementById('copyModal').addEventListener('click', function(e) {
@@ -1342,11 +1386,9 @@ function setRingStatus(status) {
     return;
   }
   const key = currentRoundKey();
-  ensureRoundExists(key);
-  if (!state.rounds[key].rings) state.rounds[key].rings = {};
-  if (!state.rounds[key].rings[modalRingId]) state.rounds[key].rings[modalRingId] = {};
-  state.rounds[key].rings[modalRingId].manualStatus = status === 'ready' ? null : status;
-  saveState();
+  const val = status === 'ready' ? null : status;
+  // Granular write — only update this one ring's status
+  db.ref(`tournament/rounds/${key}/rings/${modalRingId}/manualStatus`).set(val);
   closeModal();
   toast(`Ring ${modalRingId} marked as ${getRingStatusLabel(status)}.`);
 }

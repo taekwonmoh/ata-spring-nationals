@@ -1739,6 +1739,27 @@ function handleCsvFile(event) {
   reader.readAsText(file);
 }
 
+// Collapse newlines that appear inside quoted CSV cells so that a single
+// logical row stays on a single physical line before we call split('\n').
+// Without this, ATA sheets with multi-session event cells (embedded line
+// breaks inside quotes) get shredded and entire rings disappear.
+function preprocessCsvMultiline(raw) {
+  let out = '';
+  let inQuotes = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      out += ch;
+    } else if ((ch === '\n' || ch === '\r') && inQuotes) {
+      out += ' '; // collapse embedded newlines into a space
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 function parseCsvLine(line) {
   const result = [];
   let current = '';
@@ -1875,7 +1896,9 @@ function importCsvSheet() {
   if (!isAdmin) return toast('Admin access required.');
   const raw = document.getElementById('bulkImport').value.trim();
   if (!raw) return toast('Paste or upload CSV data first.');
-  const lines = raw.split('\n');
+  // Collapse embedded newlines inside quoted cells so multi-session rings
+  // (event column with two-line score blocks) don't get shredded.
+  const lines = preprocessCsvMultiline(raw).split('\n');
   const key = currentRoundKey();
 
   const pendingJudges = []; // { name, ringId, role, sessionId }

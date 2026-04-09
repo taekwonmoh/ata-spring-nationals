@@ -370,6 +370,22 @@
       font-size: 0.78rem; font-weight: 800; color: #92400e;
       text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
     }
+    .cover-search {
+      width: 100%; padding: 8px 10px; border-radius: 6px;
+      border: 1px solid #fcd34d; font-size: 0.9rem; margin-bottom: 6px;
+      background: white;
+    }
+    .cover-search:focus { outline: 2px solid #f59e0b; outline-offset: -1px; }
+    .cover-picker .new-sub-option {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; background: #ecfdf5; border-radius: 6px;
+      margin-top: 4px; border: 1px dashed var(--green);
+    }
+    .cover-picker .new-sub-option button {
+      padding: 6px 12px; border-radius: 6px; border: none;
+      background: var(--green); color: white; font-weight: 700;
+      cursor: pointer; font-size: 0.78rem;
+    }
     .cover-picker .sub-option {
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 10px; background: white; border-radius: 6px;
@@ -2232,14 +2248,43 @@ function openCoverPicker(judgeId) {
 
   const judge = findJudgeById(judgeId);
   if (!judge) return;
-  // Available subs = subs in this round who are NOT already covering someone
-  const subs = currentSubs().filter(s => !s.coveringJudgeId);
-  let html = `<div class="cover-picker">
-    <div class="cover-picker-title">Pick a substitute to cover ${esc(judge.name)}</div>`;
-  if (subs.length === 0) {
-    html += `<div class="empty">No available substitutes. Add one in Setup or check that no sub is already covering another slot.</div>`;
+
+  picker.innerHTML = `
+    <div class="cover-picker">
+      <div class="cover-picker-title">Pick a substitute to cover ${esc(judge.name)}</div>
+      <input class="cover-search" id="coverSearch_${judgeId}" type="text"
+             placeholder="Search subs or type a new name..."
+             oninput="filterCoverPicker(${judgeId})"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();coverPickerEnter(${judgeId});}">
+      <div id="coverList_${judgeId}"></div>
+      <div style="margin-top:8px;text-align:right;">
+        <button class="btn-uncover" onclick="openCoverPicker(${judgeId})">Cancel</button>
+      </div>
+    </div>`;
+  picker.style.display = 'block';
+  filterCoverPicker(judgeId);
+  setTimeout(() => {
+    const inp = document.getElementById(`coverSearch_${judgeId}`);
+    if (inp) inp.focus();
+  }, 50);
+}
+
+function filterCoverPicker(judgeId) {
+  const inp = document.getElementById(`coverSearch_${judgeId}`);
+  const list = document.getElementById(`coverList_${judgeId}`);
+  if (!inp || !list) return;
+  const q = (inp.value || '').trim();
+  const qLower = q.toLowerCase();
+
+  // Available subs = round subs not already covering someone, filtered by query
+  let subs = currentSubs().filter(s => !s.coveringJudgeId);
+  if (qLower) subs = subs.filter(s => s.name.toLowerCase().includes(qLower));
+
+  let html = '';
+  if (subs.length === 0 && !q) {
+    html += `<div class="empty">No substitutes added yet. Type a name above to add one on the fly.</div>`;
   } else {
-    subs.forEach(s => {
+    subs.slice(0, 25).forEach(s => {
       const inLabel = s.checkedIn ? ' &middot; <span style="color:var(--green);font-weight:700;">checked in</span>' : '';
       html += `
         <div class="sub-option">
@@ -2251,11 +2296,73 @@ function openCoverPicker(judgeId) {
         </div>`;
     });
   }
-  html += `<div style="margin-top:8px;text-align:right;">
-    <button class="btn-uncover" onclick="openCoverPicker(${judgeId})">Cancel</button>
-  </div></div>`;
-  picker.innerHTML = html;
-  picker.style.display = 'block';
+
+  // Offer "create new sub" option whenever the user has typed something that
+  // isn't an exact match for an existing sub
+  if (q) {
+    const exact = currentSubs().some(s => s.name.toLowerCase() === qLower);
+    if (!exact) {
+      html += `
+        <div class="new-sub-option">
+          <div>
+            <div style="font-weight:700;">Add &amp; use &ldquo;${esc(q)}&rdquo;</div>
+            <div style="font-size:0.72rem;color:var(--gray);">New substitute &mdash; press Enter or click</div>
+          </div>
+          <button onclick="coverWithNewSub(${judgeId}, this.parentNode.parentNode.parentNode.querySelector('input').value)">Add &amp; Use</button>
+        </div>`;
+    }
+  }
+  list.innerHTML = html;
+}
+
+function coverPickerEnter(judgeId) {
+  const inp = document.getElementById(`coverSearch_${judgeId}`);
+  if (!inp) return;
+  const q = (inp.value || '').trim();
+  if (!q) return;
+  const qLower = q.toLowerCase();
+  // If exactly one matching existing sub, use it
+  const matches = currentSubs().filter(s => !s.coveringJudgeId && s.name.toLowerCase().includes(qLower));
+  if (matches.length === 1) {
+    coverWithSub(judgeId, matches[0].id);
+    return;
+  }
+  // Otherwise create a new sub with the typed name
+  coverWithNewSub(judgeId, q);
+}
+
+function coverWithNewSub(judgeId, rawName) {
+  const name = (rawName || '').trim();
+  if (!name) return toast('Please enter a substitute name.');
+  const judge = findJudgeById(judgeId);
+  if (!judge) return toast('Could not find judge.');
+  const key = currentRoundKey();
+
+  fbAllocateIds(1).then(startId => {
+    const subId = startId;
+    const now = new Date();
+    const tStr = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const tStamp = now.getTime();
+
+    const updates = {};
+    // Create the new sub already linked as covering this judge
+    updates[`tournament/rounds/${key}/subs/${subId}`] = {
+      id: subId, name, role: 'Substitute',
+      checkedIn: true, checkInTime: tStr, checkInTimestamp: tStamp,
+      coveringJudgeId: judgeId,
+      coveringRingId: judge.ringId || null,
+      coveringSessionId: judge.sessionId || 's1'
+    };
+    // Mark the original judge as covered + checked in
+    updates[`tournament/rounds/${key}/judges/${judgeId}/checkedIn`] = true;
+    updates[`tournament/rounds/${key}/judges/${judgeId}/checkInTime`] = tStr;
+    updates[`tournament/rounds/${key}/judges/${judgeId}/checkInTimestamp`] = tStamp;
+    updates[`tournament/rounds/${key}/judges/${judgeId}/coveredBy`] = subId;
+
+    db.ref().update(updates).catch(fbErr);
+    toast(`${name} added & now covering ${judge.name} on Ring ${judge.ringId}.`);
+    setTimeout(() => { if (modalRingId) openModal(modalRingId); }, 100);
+  }).catch(()=>{});
 }
 
 function coverWithSub(judgeId, subId) {

@@ -248,6 +248,26 @@
       padding: 2px 6px; border-radius: 4px; margin-left: 6px;
       vertical-align: middle;
     }
+    .checkin-subtabs {
+      display: flex; gap: 8px; margin-bottom: 12px;
+      border-bottom: 2px solid var(--border);
+    }
+    .checkin-subtab {
+      background: transparent; border: none; padding: 10px 18px;
+      font-size: 0.95rem; font-weight: 700; color: var(--gray);
+      cursor: pointer; border-bottom: 3px solid transparent;
+      margin-bottom: -2px; transition: all .15s;
+    }
+    .checkin-subtab:hover { color: var(--text); }
+    .checkin-subtab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .checkin-subtab .count {
+      display: inline-block; margin-left: 6px; font-size: 0.75rem;
+      background: var(--gray-bg); color: var(--text2);
+      padding: 2px 8px; border-radius: 10px; font-weight: 700;
+    }
+    .checkin-subtab.active .count { background: var(--blue); color: white; }
+    .checkin-subtab.subs-tab.active { color: #b45309; border-bottom-color: #f59e0b; }
+    .checkin-subtab.subs-tab.active .count { background: #f59e0b; color: white; }
     .subs-section-header, .judges-section-header {
       font-size: 0.85rem; font-weight: 800; color: var(--gray);
       text-transform: uppercase; letter-spacing: 0.06em;
@@ -558,6 +578,10 @@
 
   <!-- CHECK-IN -->
   <div id="tab-checkin" class="tab-content">
+    <div class="checkin-subtabs">
+      <button class="checkin-subtab active" id="subtabMain" onclick="switchCheckinSubtab('main')">Assigned Judges <span class="count" id="subtabMainCount">0</span></button>
+      <button class="checkin-subtab subs-tab" id="subtabSubs" onclick="switchCheckinSubtab('subs')">Substitutes <span class="count" id="subtabSubsCount">0</span></button>
+    </div>
     <div class="checkin-controls">
       <input class="search-box" id="judgeSearch" type="text" placeholder="Search judge by name..." oninput="renderCheckin()">
       <select class="ring-filter-select" id="ringFilterSelect" onchange="renderCheckin()">
@@ -1182,6 +1206,17 @@ function setDashFilter(f, btn) {
   renderDashboard();
 }
 
+let checkinSubtab = 'main'; // 'main' | 'subs'
+function switchCheckinSubtab(which) {
+  checkinSubtab = which;
+  document.getElementById('subtabMain').classList.toggle('active', which === 'main');
+  document.getElementById('subtabSubs').classList.toggle('active', which === 'subs');
+  // Ring filter is only meaningful for assigned judges
+  const ringSel = document.getElementById('ringFilterSelect');
+  if (ringSel) ringSel.style.display = which === 'subs' ? 'none' : '';
+  renderCheckin();
+}
+
 function renderCheckin() {
   const search = (document.getElementById('judgeSearch').value || '').toLowerCase();
   const ringF  = document.getElementById('ringFilterSelect').value;
@@ -1212,20 +1247,26 @@ function renderCheckin() {
   if (statF === 'in')  judges = judges.filter(j => j.checkedIn);
   if (statF === 'out') judges = judges.filter(j => !j.checkedIn);
 
-  // Substitute judges (separate top section, not affected by ring filter)
-  const subs = currentSubs();
-  let subsHtml = '';
-  if (subs.length > 0) {
-    let visibleSubs = [...subs].sort((a,b) => a.name.localeCompare(b.name));
+  // Update sub-tab counts (always reflect total counts for current round)
+  const allSubs = currentSubs();
+  const mainCountEl = document.getElementById('subtabMainCount');
+  const subsCountEl = document.getElementById('subtabSubsCount');
+  if (mainCountEl) mainCountEl.textContent = `${allJudges.filter(j=>j.checkedIn).length}/${allJudges.length}`;
+  if (subsCountEl) subsCountEl.textContent = `${allSubs.filter(s=>s.checkedIn).length}/${allSubs.length}`;
+
+  let html = '';
+
+  if (checkinSubtab === 'subs') {
+    let visibleSubs = [...allSubs].sort((a,b) => a.name.localeCompare(b.name));
     if (search) visibleSubs = visibleSubs.filter(s => s.name.toLowerCase().includes(search));
     if (statF === 'in')  visibleSubs = visibleSubs.filter(s => s.checkedIn);
     if (statF === 'out') visibleSubs = visibleSubs.filter(s => !s.checkedIn);
-    if (ringF) visibleSubs = []; // hide subs when filtering to a specific ring
-    if (visibleSubs.length > 0) {
-      subsHtml += `<div class="subs-section-header">Substitute Judges (${visibleSubs.filter(s=>s.checkedIn).length}/${visibleSubs.length} checked in)</div>`;
+    if (visibleSubs.length === 0) {
+      html = '<div class="empty-state">No substitute judges to show.</div>';
+    } else {
       visibleSubs.forEach(s => {
         const timeLabel = s.checkedIn && s.checkInTime ? `Checked in at ${s.checkInTime}` : '';
-        subsHtml += `
+        html += `
           <div class="judge-row sub-row ${s.checkedIn ? 'checked-in' : ''}">
             <div style="font-size:1.6rem;">${s.checkedIn ? '&#10003;' : '&#9744;'}</div>
             <div class="judge-info">
@@ -1240,15 +1281,13 @@ function renderCheckin() {
           </div>`;
       });
     }
+    document.getElementById('judgeList').innerHTML = html;
+    return;
   }
 
-  let html = subsHtml;
-  if (judges.length === 0 && !subsHtml) {
+  if (judges.length === 0) {
     html = '<div class="empty-state">No judges found for this round.</div>';
-  } else if (judges.length === 0) {
-    // subs only
   } else {
-    if (subsHtml) html += '<div class="judges-section-header">Assigned Judges</div>';
     judges.forEach(j => {
       const ringLabel = j.ringId ? `Ring ${j.ringId}` : 'Unassigned';
       const sess = judgeSession(j);

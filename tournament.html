@@ -1785,7 +1785,7 @@ function parseSessionsFromEventCell(eventCol) {
   if (!eventCol || eventCol.toUpperCase() === 'OPEN') return [];
   const scoreRe = /\(\d+(?:-\d+)+\)/g;
   const timeRe  = /\d{1,2}:\d{2}\s*[AP]M/i;
-  const codeRe  = /[A-Z]{1,4}[-/][A-Z0-9/+]+(?:\/[A-Z])?/;
+  const codeRe  = /[A-Z]{1,4}[-/][A-Z0-9/+\-]+(?:\/[A-Z])?/;
 
   const cleanCode = (block) => {
     block = block.replace(scoreRe, ' ').replace(timeRe, ' ').replace(/\s*-\s*$/,'').trim();
@@ -1804,12 +1804,13 @@ function parseSessionsFromEventCell(eventCol) {
     return [{ time, eventName }];
   }
 
-  // Multi-session — split between score patterns
+  // Multi-session — each session's text spans from the end of the previous
+  // score to the end of its own score, so the time/code that PRECEDE each
+  // score stay grouped with that score. (ATA format is "TIME CODE (SCORE)".)
   const sessions = [];
   let lastEnd = 0;
-  scoreMatches.forEach((m, idx) => {
-    const isLast = idx === scoreMatches.length - 1;
-    const blockEnd = isLast ? eventCol.length : scoreMatches[idx + 1].index;
+  scoreMatches.forEach((m) => {
+    const blockEnd = m.index + m[0].length;
     const block = eventCol.substring(lastEnd, blockEnd);
     const time  = (block.match(timeRe) || [''])[0].trim();
     const codeM = block.match(codeRe);

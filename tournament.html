@@ -329,6 +329,8 @@
       background: white; border-radius: 16px;
       padding: 28px; width: 90%; max-width: 420px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-height: 90vh; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .modal h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 8px; }
     .modal .modal-sub { color: var(--gray); font-size: 0.875rem; margin-bottom: 20px; }
@@ -365,6 +367,11 @@
     .cover-picker {
       margin: 6px 0 10px; padding: 10px; background: #fffbeb;
       border: 2px solid #fcd34d; border-radius: 8px;
+    }
+    .cover-list-scroll {
+      max-height: 240px; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-right: 2px;
     }
     .cover-picker-title {
       font-size: 0.78rem; font-weight: 800; color: #92400e;
@@ -2256,7 +2263,7 @@ function openCoverPicker(judgeId) {
              placeholder="Search subs or type a new name..."
              oninput="filterCoverPicker(${judgeId})"
              onkeydown="if(event.key==='Enter'){event.preventDefault();coverPickerEnter(${judgeId});}">
-      <div id="coverList_${judgeId}"></div>
+      <div id="coverList_${judgeId}" class="cover-list-scroll"></div>
       <div style="margin-top:8px;text-align:right;">
         <button class="btn-uncover" onclick="openCoverPicker(${judgeId})">Cancel</button>
       </div>
@@ -2284,7 +2291,7 @@ function filterCoverPicker(judgeId) {
   if (subs.length === 0 && !q) {
     html += `<div class="empty">No substitutes added yet. Type a name above to add one on the fly.</div>`;
   } else {
-    subs.slice(0, 25).forEach(s => {
+    subs.forEach(s => {
       const inLabel = s.checkedIn ? ' &middot; <span style="color:var(--green);font-weight:700;">checked in</span>' : '';
       html += `
         <div class="sub-option">

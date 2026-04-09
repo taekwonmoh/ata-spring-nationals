@@ -957,6 +957,14 @@ function debouncedRender() {
   });
 }
 
+// Global error handler for any Firebase write that fails. Surfaces failures
+// instead of silently dropping them so users know to retry.
+function fbErr(err) {
+  console.error('Firebase write failed:', err);
+  const msg = (err && err.message) ? err.message : 'network error';
+  toast('\u26A0 Save failed: ' + msg + '. Check connection and retry.');
+}
+
 stateRef.on('value', (snapshot) => {
   const data = snapshot.val();
   if (data) {
@@ -973,27 +981,30 @@ stateRef.on('value', (snapshot) => {
     state = defaultState();
   }
   debouncedRender();
+}, (err) => {
+  console.error('Firebase listener error:', err);
+  toast('\u26A0 Database error: ' + (err && err.code ? err.code : 'unknown') + '. Refresh the page.');
 });
 
 function saveState() {
-  stateRef.set(state);
+  stateRef.set(state).catch(fbErr);
 }
 
 // Granular Firebase writes — only touch what changed
 function fbUpdateJudge(roundK, judgeId, judgeData) {
-  db.ref(`tournament/rounds/${roundK}/judges/${judgeId}`).set(judgeData);
+  db.ref(`tournament/rounds/${roundK}/judges/${judgeId}`).set(judgeData).catch(fbErr);
 }
 
 function fbRemoveJudge(roundK, judgeId) {
-  db.ref(`tournament/rounds/${roundK}/judges/${judgeId}`).remove();
+  db.ref(`tournament/rounds/${roundK}/judges/${judgeId}`).remove().catch(fbErr);
 }
 
 function fbUpdateRingStatus(roundK, ringId, statusData) {
-  db.ref(`tournament/rounds/${roundK}/rings/${ringId}`).set(statusData);
+  db.ref(`tournament/rounds/${roundK}/rings/${ringId}`).set(statusData).catch(fbErr);
 }
 
 function fbUpdateSettings(updates) {
-  stateRef.update(updates);
+  stateRef.update(updates).catch(fbErr);
 }
 
 function fbAllocateIds(count) {
@@ -1003,6 +1014,9 @@ function fbAllocateIds(count) {
   }).then((result) => {
     // Returns the starting ID (before increment)
     return result.snapshot.val() - count;
+  }).catch((err) => {
+    fbErr(err);
+    throw err; // propagate so callers don't proceed with bad ID
   });
 }
 
@@ -1037,7 +1051,7 @@ function editRoundTime(d, r) {
   const v = prompt(`Start time for Day ${d}, Round ${r}:`, cur);
   if (v === null) return;
   const trimmed = v.trim();
-  db.ref(`tournament/roundTimes/${k}`).set(trimmed || null);
+  db.ref(`tournament/roundTimes/${k}`).set(trimmed || null).catch(fbErr);
   toast(trimmed ? `Set to ${trimmed}` : 'Cleared start time');
 }
 
@@ -1484,9 +1498,9 @@ function addJudge() {
     db.ref(`tournament/rounds/${key}/judges/${id}`).set({
       id, name, ringId: ring ? parseInt(ring) : null, role,
       checkedIn: false, checkInTime: null
-    });
+    }).catch(fbErr);
     toast(`Added ${name}`);
-  });
+  }).catch(()=>{});
   document.getElementById('addJudgeName').value = '';
 }
 
@@ -1506,7 +1520,7 @@ function saveRoundSchedule() {
     const v = inp.value.trim();
     updates[`tournament/roundTimes/${k}`] = v || null;
   });
-  db.ref().update(updates);
+  db.ref().update(updates).catch(fbErr);
   toast('Round schedule saved!');
 }
 
@@ -1522,16 +1536,16 @@ function addSub() {
     db.ref(`tournament/rounds/${key}/subs/${id}`).set({
       id, name, role: role || 'Substitute',
       checkedIn: false, checkInTime: null, checkInTimestamp: null
-    });
+    }).catch(fbErr);
     toast(`Added substitute ${name}`);
-  });
+  }).catch(()=>{});
   document.getElementById('addSubName').value = '';
 }
 
 function removeSub(id) {
   if (!isAdmin) return toast('Admin access required.');
   const key = currentRoundKey();
-  db.ref(`tournament/rounds/${key}/subs/${id}`).remove();
+  db.ref(`tournament/rounds/${key}/subs/${id}`).remove().catch(fbErr);
 }
 
 function importSubs() {
@@ -1559,9 +1573,9 @@ function importSubs() {
         checkedIn: false, checkInTime: null, checkInTimestamp: null
       };
     });
-    db.ref().update(updates);
+    db.ref().update(updates).catch(fbErr);
     toast(`Imported ${lines.length} substitute judges.`);
-  });
+  }).catch(()=>{});
   document.getElementById('subImport').value = '';
 }
 
@@ -1569,7 +1583,7 @@ function clearRoundSubs() {
   if (!isAdmin) return toast('Admin access required.');
   if (!confirm(`Clear ALL substitute judges for Day ${currentDay}, Round ${currentRound}?`)) return;
   const key = currentRoundKey();
-  db.ref(`tournament/rounds/${key}/subs`).remove();
+  db.ref(`tournament/rounds/${key}/subs`).remove().catch(fbErr);
   toast('Substitutes cleared.');
 }
 
@@ -1586,7 +1600,7 @@ function toggleSubCheckin(id) {
     checkedIn: newCheckedIn,
     checkInTime: newTime,
     checkInTimestamp: newTimestamp
-  });
+  }).catch(fbErr);
   toast(newCheckedIn ? `${s.name} checked in!` : `${s.name} check-in undone.`);
 }
 
@@ -1604,7 +1618,7 @@ function toggleCheckin(id) {
     checkedIn: newCheckedIn,
     checkInTime: newTime,
     checkInTimestamp: newTimestamp
-  });
+  }).catch(fbErr);
   toast(newCheckedIn ? `${j.name} checked in!` : `${j.name} check-in undone.`);
 }
 
@@ -1613,8 +1627,8 @@ function clearRoundJudges() {
   if (!confirm(`Clear ALL judges for Day ${currentDay}, Round ${currentRound}?`)) return;
   if (!confirm('Are you REALLY sure? This cannot be undone.')) return;
   const key = currentRoundKey();
-  db.ref(`tournament/rounds/${key}/judges`).remove();
-  db.ref(`tournament/rounds/${key}/events`).remove();
+  // Only clear judges — preserve events/sessions metadata so a re-import isn't required
+  db.ref(`tournament/rounds/${key}/judges`).remove().catch(fbErr);
   toast(`Judges cleared for Day ${currentDay}, Round ${currentRound}.`);
 }
 
@@ -1628,9 +1642,17 @@ function resetRoundCheckIns() {
     Object.keys(rd.judges).forEach(id => {
       updates[`tournament/rounds/${key}/judges/${id}/checkedIn`] = false;
       updates[`tournament/rounds/${key}/judges/${id}/checkInTime`] = null;
+      updates[`tournament/rounds/${key}/judges/${id}/checkInTimestamp`] = null;
     });
-    updates[`tournament/rounds/${key}/rings`] = null;
-    db.ref().update(updates);
+    // Also reset substitute check-ins for this round
+    if (rd.subs) {
+      Object.keys(rd.subs).forEach(id => {
+        updates[`tournament/rounds/${key}/subs/${id}/checkedIn`] = false;
+        updates[`tournament/rounds/${key}/subs/${id}/checkInTime`] = null;
+        updates[`tournament/rounds/${key}/subs/${id}/checkInTimestamp`] = null;
+      });
+    }
+    db.ref().update(updates).catch(fbErr);
   }
   toast(`Check-ins reset for Day ${currentDay}, Round ${currentRound}.`);
 }
@@ -1952,11 +1974,11 @@ function importCsvSheet() {
         updates[`tournament/roundTimes/${key}`] = top[0];
       }
     }
-    db.ref().update(updates);
+    db.ref().update(updates).catch(fbErr);
     const ringCount = Object.keys(pendingEvents).length;
     const extraNote = multiSessionRings > 0 ? ` (${multiSessionRings} with multiple sessions)` : '';
     toast(`Imported ${pendingJudges.length} judges across ${ringCount} rings${extraNote}.`);
-  });
+  }).catch(()=>{});
 
   document.getElementById('bulkImport').value = '';
   document.getElementById('csvFileInput').value = '';
@@ -2014,9 +2036,9 @@ function executeCopy() {
     Object.entries(srcEvents).forEach(([ringId, eventName]) => {
       updates[`tournament/rounds/${targetKey}/events/${ringId}`] = eventName;
     });
-    db.ref().update(updates);
+    db.ref().update(updates).catch(fbErr);
     toast(`Copied ${judges.length} judges to ${targetKey.replace('d','Day ').replace('_r',', Round ')}.`);
-  });
+  }).catch(()=>{});
   closeCopyModal();
 }
 
@@ -2135,7 +2157,7 @@ function setRingStatus(status) {
   const key = currentRoundKey();
   const val = status === 'ready' ? null : status;
   // Granular write — only update this one ring's status
-  db.ref(`tournament/rounds/${key}/rings/${modalRingId}/manualStatus`).set(val);
+  db.ref(`tournament/rounds/${key}/rings/${modalRingId}/manualStatus`).set(val).catch(fbErr);
   closeModal();
   toast(`Ring ${modalRingId} marked as ${getRingStatusLabel(status)}.`);
 }

@@ -100,6 +100,14 @@
     }
     .dr-pill:hover { border-color: var(--accent); color: var(--accent); }
     .dr-pill.active { background: var(--accent); border-color: var(--accent); color: white; }
+    .dr-pill.no-time { color: #b45309; border-color: #fcd34d; background: #fffbeb; font-style: italic; }
+    .dr-pill.no-time.active { background: #f59e0b; border-color: #f59e0b; color: white; font-style: normal; }
+    .dr-edit {
+      display: inline-block; margin-left: 8px; padding: 0 6px;
+      border-radius: 6px; font-size: 0.85rem; opacity: 0.7;
+    }
+    .dr-edit:hover { background: rgba(0,0,0,0.12); opacity: 1; }
+    .dr-pill.active .dr-edit:hover { background: rgba(255,255,255,0.25); }
     .dr-divider {
       width: 1px; height: 24px; background: var(--border); margin: 0 4px;
     }
@@ -998,13 +1006,28 @@ function renderDayRoundBar() {
   }
   document.getElementById('dayPills').innerHTML = dHtml;
 
-  // Rounds — labelled by start time when set, else "Round N"
+  // Rounds — labelled by start time when set; admins can edit inline
   let rHtml = '';
   for (let r = 1; r <= state.roundsPerDay; r++) {
-    const label = esc(roundLabel(currentDay, r));
-    rHtml += `<button class="dr-pill ${r === currentRound ? 'active' : ''}" onclick="selectRound(${r})">${label}</button>`;
+    const t = roundTime(currentDay, r);
+    const label = t ? esc(t) : (isAdmin ? 'Set start time' : `Round ${r}`);
+    const editBtn = isAdmin
+      ? `<span class="dr-edit" onclick="event.stopPropagation();editRoundTime(${currentDay},${r})" title="Edit start time">&#9998;</span>`
+      : '';
+    rHtml += `<button class="dr-pill ${r === currentRound ? 'active' : ''} ${!t ? 'no-time' : ''}" onclick="selectRound(${r})">${label}${editBtn}</button>`;
   }
   document.getElementById('roundPills').innerHTML = rHtml;
+}
+
+function editRoundTime(d, r) {
+  if (!isAdmin) return;
+  const k = roundKey(d, r);
+  const cur = (state.roundTimes && state.roundTimes[k]) || '';
+  const v = prompt(`Start time for Day ${d}, Round ${r}:`, cur);
+  if (v === null) return;
+  const trimmed = v.trim();
+  db.ref(`tournament/roundTimes/${k}`).set(trimmed || null);
+  toast(trimmed ? `Set to ${trimmed}` : 'Cleared start time');
 }
 
 function selectDay(d) {

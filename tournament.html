@@ -240,6 +240,20 @@
       padding: 2px 6px; border-radius: 4px; margin-left: 6px;
       vertical-align: middle;
     }
+    .subs-section-header, .judges-section-header {
+      font-size: 0.85rem; font-weight: 800; color: var(--gray);
+      text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 12px 4px 6px; border-bottom: 2px solid var(--border);
+      margin-bottom: 6px;
+    }
+    .subs-section-header { color: #b45309; border-bottom-color: #fcd34d; }
+    .judge-row.sub-row { border-left: 4px solid #f59e0b; }
+    .sub-badge {
+      display: inline-block; font-size: 0.65rem; font-weight: 800;
+      color: #78350f; background: linear-gradient(135deg,#fde047,#facc15);
+      padding: 2px 8px; border-radius: 10px; margin-left: 8px;
+      vertical-align: middle; letter-spacing: 0.05em;
+    }
     .judge-row .judge-event {
       font-size: 0.78rem; color: var(--text); font-weight: 600;
       margin-top: 2px; padding: 2px 6px; background: rgba(99,102,241,0.1);
@@ -499,7 +513,7 @@
   <span class="dr-label">Day:</span>
   <div class="dr-pills" id="dayPills"></div>
   <div class="dr-divider"></div>
-  <span class="dr-label">Round:</span>
+  <span class="dr-label">Start Time:</span>
   <div class="dr-pills" id="roundPills"></div>
 </div>
 
@@ -632,6 +646,50 @@
           <div class="help-text">ATA format: Column B = Ring #, Column C = Event name, Columns D/E/F = Judge 1/2/3. Rows with "OPEN" judges are skipped.</div>
         </div>
         <button class="btn-primary" onclick="importCsvSheet()">Import Ring Sheet</button>
+      </div>
+
+      <!-- Round Schedule -->
+      <div class="setup-card" style="grid-column: span 2;">
+        <h3>Round Schedule <span style="color:var(--gray);font-size:0.85rem;font-weight:400;">(Start times shown in pills above)</span></h3>
+        <div id="roundScheduleEditor" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"></div>
+        <button class="btn-primary" style="margin-top:14px;" onclick="saveRoundSchedule()">Save Round Schedule</button>
+      </div>
+
+      <!-- Substitute Judges -->
+      <div class="setup-card" style="grid-column: span 2;">
+        <h3>Substitute Judges <span style="color:var(--gray);font-size:0.85rem;font-weight:400;" id="subContext"></span></h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div>
+            <div class="form-row">
+              <label class="form-label">Add Substitute Judge</label>
+              <input class="form-input" id="addSubName" type="text" placeholder="First Last">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Role (optional)</label>
+              <select class="form-select" id="addSubRole">
+                <option value="Substitute">Substitute</option>
+                <option value="Center">Center Judge</option>
+                <option value="Corner">Corner Judge</option>
+                <option value="Head">Head Judge</option>
+                <option value="Timekeeper">Timekeeper</option>
+              </select>
+            </div>
+            <button class="btn-primary" onclick="addSub()">Add Substitute</button>
+          </div>
+          <div>
+            <div class="form-row">
+              <label class="form-label">Bulk Import Substitutes</label>
+              <textarea class="import-area" id="subImport" placeholder="One name per line, e.g.&#10;SMITH, JOHN&#10;DOE, JANE&#10;LEE, BOB" style="min-height:120px;"></textarea>
+              <div class="help-text">Paste names one per line. Lines starting with "OPEN" are skipped.</div>
+            </div>
+            <button class="btn-primary" onclick="importSubs()">Import Substitutes</button>
+          </div>
+        </div>
+        <h4 style="margin-top:18px;font-size:0.95rem;">Current Substitutes <span style="color:var(--gray);font-weight:400;" id="subCountLabel"></span></h4>
+        <div class="judge-setup-list" id="subSetupList" style="margin-top:8px;"></div>
+        <div style="margin-top:14px;">
+          <button class="btn-primary" style="background:var(--red);" onclick="clearRoundSubs()">Clear All Substitutes</button>
+        </div>
       </div>
 
       <!-- Judge List (current day/round) -->
@@ -779,6 +837,7 @@ function defaultState() {
     days: 1,
     roundsPerDay: 1,
     rounds: {},
+    roundTimes: {},
     nextJudgeId: 1
   };
 }
@@ -848,6 +907,24 @@ function judgeSession(j) {
   return sess.find(s => s.id === j.sessionId) || sess[0] || null;
 }
 
+// Substitutes per round
+function getSubsForRound(d, r) {
+  const rd = state.rounds[roundKey(d, r)];
+  if (!rd || !rd.subs) return [];
+  return Object.values(rd.subs);
+}
+function currentSubs() {
+  return getSubsForRound(currentDay, currentRound);
+}
+
+// Round start time
+function roundTime(d, r) {
+  return (state.roundTimes && state.roundTimes[roundKey(d, r)]) || '';
+}
+function roundLabel(d, r) {
+  return roundTime(d, r) || `Round ${r}`;
+}
+
 // ════════════════════════════════════════════════════════
 //  FIREBASE REAL-TIME LISTENER
 // ════════════════════════════════════════════════════════
@@ -870,6 +947,7 @@ stateRef.on('value', (snapshot) => {
       days: data.days || 1,
       roundsPerDay: data.roundsPerDay || 1,
       rounds: data.rounds || {},
+      roundTimes: data.roundTimes || {},
       nextJudgeId: data.nextJudgeId || 1
     };
   } else {
@@ -920,10 +998,11 @@ function renderDayRoundBar() {
   }
   document.getElementById('dayPills').innerHTML = dHtml;
 
-  // Rounds
+  // Rounds — labelled by start time when set, else "Round N"
   let rHtml = '';
   for (let r = 1; r <= state.roundsPerDay; r++) {
-    rHtml += `<button class="dr-pill ${r === currentRound ? 'active' : ''}" onclick="selectRound(${r})">Round ${r}</button>`;
+    const label = esc(roundLabel(currentDay, r));
+    rHtml += `<button class="dr-pill ${r === currentRound ? 'active' : ''}" onclick="selectRound(${r})">${label}</button>`;
   }
   document.getElementById('roundPills').innerHTML = rHtml;
 }
@@ -997,7 +1076,8 @@ function renderAll() {
 
 function renderHeader() {
   document.getElementById('tournamentTitle').textContent = state.name || 'Tournament Command';
-  document.getElementById('headerSub').textContent = `Day ${currentDay} \u2022 Round ${currentRound}`;
+  const rt = roundTime(currentDay, currentRound);
+  document.getElementById('headerSub').textContent = `Day ${currentDay} \u2022 ${rt || 'Round ' + currentRound}`;
   const s = getStats();
   document.getElementById('headerStats').innerHTML = `
     <div class="hstat"><div class="val">${state.ringCount}</div><div class="lbl">Rings</div></div>
@@ -1109,10 +1189,43 @@ function renderCheckin() {
   if (statF === 'in')  judges = judges.filter(j => j.checkedIn);
   if (statF === 'out') judges = judges.filter(j => !j.checkedIn);
 
-  let html = '';
-  if (judges.length === 0) {
+  // Substitute judges (separate top section, not affected by ring filter)
+  const subs = currentSubs();
+  let subsHtml = '';
+  if (subs.length > 0) {
+    let visibleSubs = [...subs].sort((a,b) => a.name.localeCompare(b.name));
+    if (search) visibleSubs = visibleSubs.filter(s => s.name.toLowerCase().includes(search));
+    if (statF === 'in')  visibleSubs = visibleSubs.filter(s => s.checkedIn);
+    if (statF === 'out') visibleSubs = visibleSubs.filter(s => !s.checkedIn);
+    if (ringF) visibleSubs = []; // hide subs when filtering to a specific ring
+    if (visibleSubs.length > 0) {
+      subsHtml += `<div class="subs-section-header">Substitute Judges (${visibleSubs.filter(s=>s.checkedIn).length}/${visibleSubs.length} checked in)</div>`;
+      visibleSubs.forEach(s => {
+        const timeLabel = s.checkedIn && s.checkInTime ? `Checked in at ${s.checkInTime}` : '';
+        subsHtml += `
+          <div class="judge-row sub-row ${s.checkedIn ? 'checked-in' : ''}">
+            <div style="font-size:1.6rem;">${s.checkedIn ? '&#10003;' : '&#9744;'}</div>
+            <div class="judge-info">
+              <div class="judge-name">${esc(s.name)}<span class="sub-badge">SUB</span></div>
+              <div class="judge-meta">Substitute &bull; ${esc(s.role||'Substitute')}</div>
+              ${timeLabel ? `<div class="judge-time">${esc(timeLabel)}</div>` : ''}
+            </div>
+            ${s.checkedIn
+              ? `<button class="btn-checkin undo" onclick="toggleSubCheckin(${s.id})">Undo Check-In</button>`
+              : `<button class="btn-checkin in"  onclick="toggleSubCheckin(${s.id})">Check In</button>`
+            }
+          </div>`;
+      });
+    }
+  }
+
+  let html = subsHtml;
+  if (judges.length === 0 && !subsHtml) {
     html = '<div class="empty-state">No judges found for this round.</div>';
+  } else if (judges.length === 0) {
+    // subs only
   } else {
+    if (subsHtml) html += '<div class="judges-section-header">Assigned Judges</div>';
     judges.forEach(j => {
       const ringLabel = j.ringId ? `Ring ${j.ringId}` : 'Unassigned';
       const sess = judgeSession(j);
@@ -1268,6 +1381,43 @@ function renderSetup() {
     });
   }
   document.getElementById('judgeSetupList').innerHTML = html;
+
+  // Round schedule editor
+  let schedHtml = '';
+  for (let d = 1; d <= state.days; d++) {
+    for (let r = 1; r <= state.roundsPerDay; r++) {
+      const k = roundKey(d, r);
+      const val = (state.roundTimes && state.roundTimes[k]) || '';
+      schedHtml += `
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="form-label" style="margin:0;">Day ${d} \u00b7 Round ${r}</label>
+          <input class="form-input" data-rkey="${k}" type="text" placeholder="e.g. 10:30 AM" value="${esc(val)}">
+        </div>`;
+    }
+  }
+  document.getElementById('roundScheduleEditor').innerHTML = schedHtml;
+
+  // Substitutes for current round
+  document.getElementById('subContext').textContent = ctxLabel;
+  const subs = currentSubs();
+  document.getElementById('subCountLabel').textContent = `(${subs.length})`;
+  const subSorted = [...subs].sort((a,b) => a.name.localeCompare(b.name));
+  let subHtml = '';
+  if (subSorted.length === 0) {
+    subHtml = '<div class="empty-state">No substitute judges added for this round yet.</div>';
+  } else {
+    subSorted.forEach(s => {
+      subHtml += `
+        <div class="judge-setup-row">
+          <div>
+            <div class="jsr-name">${esc(s.name)}</div>
+            <div class="jsr-meta">Substitute &bull; ${esc(s.role||'Substitute')}</div>
+          </div>
+          <button class="btn-danger" onclick="removeSub(${s.id})" title="Remove">&#10005;</button>
+        </div>`;
+    });
+  }
+  document.getElementById('subSetupList').innerHTML = subHtml;
 }
 
 // ════════════════════════════════════════════════════════
@@ -1275,7 +1425,7 @@ function renderSetup() {
 // ════════════════════════════════════════════════════════
 function ensureRoundExists(key) {
   if (!state.rounds[key]) {
-    state.rounds[key] = { judges: {}, rings: {}, events: {}, sessions: {} };
+    state.rounds[key] = { judges: {}, rings: {}, events: {}, sessions: {}, subs: {} };
   }
 }
 
@@ -1318,6 +1468,100 @@ function removeJudge(id) {
   if (!isAdmin) return toast('Admin access required.');
   const key = currentRoundKey();
   fbRemoveJudge(key, id);
+}
+
+// ──────── Round schedule (start times) ────────
+function saveRoundSchedule() {
+  if (!isAdmin) return toast('Admin access required.');
+  const inputs = document.querySelectorAll('#roundScheduleEditor input[data-rkey]');
+  const updates = {};
+  inputs.forEach(inp => {
+    const k = inp.getAttribute('data-rkey');
+    const v = inp.value.trim();
+    updates[`tournament/roundTimes/${k}`] = v || null;
+  });
+  db.ref().update(updates);
+  toast('Round schedule saved!');
+}
+
+// ──────── Substitute judges ────────
+function addSub() {
+  if (!isAdmin) return toast('Admin access required.');
+  const name = document.getElementById('addSubName').value.trim();
+  const role = document.getElementById('addSubRole').value;
+  if (!name) return toast('Please enter a substitute name.');
+  const key = currentRoundKey();
+  fbAllocateIds(1).then(startId => {
+    const id = startId;
+    db.ref(`tournament/rounds/${key}/subs/${id}`).set({
+      id, name, role: role || 'Substitute',
+      checkedIn: false, checkInTime: null, checkInTimestamp: null
+    });
+    toast(`Added substitute ${name}`);
+  });
+  document.getElementById('addSubName').value = '';
+}
+
+function removeSub(id) {
+  if (!isAdmin) return toast('Admin access required.');
+  const key = currentRoundKey();
+  db.ref(`tournament/rounds/${key}/subs/${id}`).remove();
+}
+
+function importSubs() {
+  if (!isAdmin) return toast('Admin access required.');
+  const raw = document.getElementById('subImport').value.trim();
+  if (!raw) return toast('Paste a list of substitute names first.');
+  const lines = raw.split('\n')
+    .map(l => l.trim())
+    .filter(l => l && l.toUpperCase() !== 'OPEN')
+    // If it looks like CSV, take the first non-empty cell
+    .map(l => {
+      if (l.includes(',') && /^[A-Z\s.-]+,\s*[A-Z]/i.test(l)) return l; // "LAST, FIRST" style
+      const cells = parseCsvLine(l).filter(c => c);
+      return cells[0] || l;
+    })
+    .filter(l => l);
+  if (lines.length === 0) return toast('No substitute names found.');
+  const key = currentRoundKey();
+  fbAllocateIds(lines.length).then(startId => {
+    const updates = {};
+    lines.forEach((name, idx) => {
+      const id = startId + idx;
+      updates[`tournament/rounds/${key}/subs/${id}`] = {
+        id, name, role: 'Substitute',
+        checkedIn: false, checkInTime: null, checkInTimestamp: null
+      };
+    });
+    db.ref().update(updates);
+    toast(`Imported ${lines.length} substitute judges.`);
+  });
+  document.getElementById('subImport').value = '';
+}
+
+function clearRoundSubs() {
+  if (!isAdmin) return toast('Admin access required.');
+  if (!confirm(`Clear ALL substitute judges for Day ${currentDay}, Round ${currentRound}?`)) return;
+  const key = currentRoundKey();
+  db.ref(`tournament/rounds/${key}/subs`).remove();
+  toast('Substitutes cleared.');
+}
+
+function toggleSubCheckin(id) {
+  const key = currentRoundKey();
+  const rd = state.rounds[key];
+  if (!rd || !rd.subs || !rd.subs[id]) return;
+  const s = rd.subs[id];
+  const newCheckedIn = !s.checkedIn;
+  const now = new Date();
+  const newTime = newCheckedIn ? now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : null;
+  const newTimestamp = newCheckedIn ? now.getTime() : null;
+  db.ref(`tournament/rounds/${key}/subs/${id}`).update({
+    checkedIn: newCheckedIn,
+    checkInTime: newTime,
+    checkInTimestamp: newTimestamp
+  });
+  toast(newCheckedIn ? `${s.name} checked in!` : `${s.name} check-in undone.`);
 }
 
 function toggleCheckin(id) {
@@ -1472,6 +1716,7 @@ function importCsvSheet() {
   const pendingJudges = []; // { name, ringId, role, sessionId }
   const pendingEvents = {}; // ringId -> primary event string (back-compat single-session display)
   const pendingSessions = {}; // ringId -> { sessionId: { time, eventName } }
+  const timeFreq = {}; // session-time -> count, for auto round-time detection
   let maxRing = 0;
   let multiSessionRings = 0;
 
@@ -1505,6 +1750,7 @@ function importCsvSheet() {
     sessions.forEach((s, i) => {
       const sid = `s${i + 1}`;
       pendingSessions[ringNum][sid] = { time: s.time, eventName: s.eventName, order: i + 1 };
+      if (s.time) timeFreq[s.time] = (timeFreq[s.time] || 0) + 1;
     });
     pendingEvents[ringNum] = sessions.map(s => (s.time ? `${s.time} ${s.eventName}` : s.eventName)).join(' | ');
 
@@ -1560,6 +1806,14 @@ function importCsvSheet() {
     });
     if (maxRing > state.ringCount) {
       updates['tournament/ringCount'] = maxRing;
+    }
+    // Auto-populate the round time with the most common session time, if any
+    const existingRoundTime = (state.roundTimes && state.roundTimes[key]) || '';
+    if (!existingRoundTime) {
+      const top = Object.entries(timeFreq).sort((a,b) => b[1] - a[1])[0];
+      if (top && top[0]) {
+        updates[`tournament/roundTimes/${key}`] = top[0];
+      }
     }
     db.ref().update(updates);
     const ringCount = Object.keys(pendingEvents).length;

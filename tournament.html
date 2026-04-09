@@ -1750,10 +1750,31 @@ function parseJudgeCell(raw) {
   return { name, times };
 }
 
-// Normalize a time string for matching ("10:30AM" form, no spaces)
+// Normalize a time string for matching: returns "HH:MM" (drops AM/PM so
+// "10:00", "10:00 AM", and "10:00AM" all match the same key).
 function normTime(t) {
   if (!t) return '';
-  return t.replace(/\s+/g, '').toUpperCase().replace(/^(\d):/, '0$1:');
+  const m = t.replace(/\s+/g, '').toUpperCase().match(/(\d{1,2}):(\d{2})/);
+  if (!m) return '';
+  return `${m[1].padStart(2,'0')}:${m[2]}`;
+}
+
+// Detect "TIME - NAME    TIME - NAME" cells where each entry is a separate
+// judge for a separate start time (e.g.
+// "10:00 - CM MICHAEL WEGMANN          1:00PM - SM SEAN HARRINGTON").
+// Returns an array of { time, name } or null if the cell isn't this format.
+function extractTimePrefixedEntries(raw) {
+  if (!raw) return null;
+  if (!/^\s*\d{1,2}:\d{2}/.test(raw)) return null;
+  const re = /(\d{1,2}:\d{2}\s*[AP]?M?)\s*-?\s*([\s\S]*?)(?=\s{2,}\d{1,2}:\d{2}|$)/gi;
+  const entries = [];
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const time = m[1].trim();
+    const name = m[2].trim().replace(/^[-\s]+/, '').replace(/\s{2,}/g, ' ').trim();
+    if (name) entries.push({ time, name });
+  }
+  return entries.length > 0 ? entries : null;
 }
 
 function importCsvSheet() {
@@ -1791,39 +1812,87 @@ function importCsvSheet() {
     const allOpen = rawJudges.every(j => !j || j.toUpperCase() === 'OPEN');
     if (allOpen) return;
 
-    const sessions = parseSessionsFromEventCell(eventCol);
-    if (sessions.length === 0) return;
+    const eventSessions = parseSessionsFromEventCell(eventCol);
+    if (eventSessions.length === 0 && rawJudges.every(j => !j || j.toUpperCase()==='OPEN')) return;
+
+    // Pre-scan judge cells for time-prefixed entries (e.g.
+    // "10:00 - CM MICHAEL WEGMANN          1:00PM - SM SEAN HARRINGTON")
+    const judgePrefixData = rawJudges.map(rc => extractTimePrefixedEntries(rc));
+
+    // Collect all unique time keys from both the event cell and the judge
+    // cells. The union gives us the full set of sessions for this ring.
+    const timeKeyToInfo = new Map(); // tkey -> { time (display), eventName }
+    eventSessions.forEach(s => {
+      const tk = normTime(s.time);
+      if (tk) {
+        timeKeyToInfo.set(tk, { time: s.time, eventName: s.eventName });
+      }
+    });
+    judgePrefixData.forEach(entries => {
+      if (!entries) return;
+      entries.forEach(e => {
+        const tk = normTime(e.time);
+        if (tk && !timeKeyToInfo.has(tk)) {
+          timeKeyToInfo.set(tk, { time: e.time, eventName: '' });
+        }
+      });
+    });
+
+    // Build the canonical session list, sorted by time
+    let sessions;
+    if (timeKeyToInfo.size > 1) {
+      const sortedKeys = [...timeKeyToInfo.keys()].sort();
+      sessions = sortedKeys.map((tk, i) => {
+        const info = timeKeyToInfo.get(tk);
+        return { id: `s${i + 1}`, time: info.time, eventName: info.eventName };
+      });
+    } else if (eventSessions.length > 1) {
+      sessions = eventSessions.map((s, i) => ({ id: `s${i + 1}`, time: s.time, eventName: s.eventName }));
+    } else {
+      const only = eventSessions[0] || { time: '', eventName: '' };
+      sessions = [{ id: 's1', time: only.time, eventName: only.eventName }];
+    }
     if (sessions.length > 1) multiSessionRings++;
 
-    // Store sessions and a primary event label for back-compat display
+    // Store sessions and a primary event label
     pendingSessions[ringNum] = {};
     sessions.forEach((s, i) => {
-      const sid = `s${i + 1}`;
-      pendingSessions[ringNum][sid] = { time: s.time, eventName: s.eventName, order: i + 1 };
+      pendingSessions[ringNum][s.id] = { time: s.time, eventName: s.eventName, order: i + 1 };
       if (s.time) timeFreq[s.time] = (timeFreq[s.time] || 0) + 1;
     });
-    pendingEvents[ringNum] = sessions.map(s => (s.time ? `${s.time} ${s.eventName}` : s.eventName)).join(' | ');
+    pendingEvents[ringNum] = sessions.map(s => (s.time ? `${s.time} ${s.eventName}` : s.eventName).trim() || `Session ${s.id}`).join(' | ');
 
     // Resolve each raw judge cell into one or more individual judges
     rawJudges.forEach((rawCell, idx) => {
       if (!rawCell || rawCell.toUpperCase() === 'OPEN') return;
       const role = idx === 0 ? 'Judge 1' : idx === 1 ? 'Judge 2' : 'Judge 3';
+      const prefixEntries = judgePrefixData[idx];
 
-      // A single cell can contain multiple distinct people (split-session rings)
+      // Time-prefix format → each entry is a separate judge for a specific session
+      if (prefixEntries && prefixEntries.length > 0) {
+        prefixEntries.forEach(e => {
+          const tk = normTime(e.time);
+          const matched = sessions.find(s => normTime(s.time) === tk);
+          const sid = matched ? matched.id : 's1';
+          pendingJudges.push({ name: e.name, ringId: ringNum, role, sessionId: sid });
+        });
+        return;
+      }
+
+      // Otherwise: split on /, newline, & (not time-pair), AND
       const peopleRaw = splitJudgeNames(rawCell);
       const people = peopleRaw.map(parseJudgeCell).filter(p => p && p.name);
       if (people.length === 0) return;
 
       if (sessions.length === 1) {
-        // Single-session ring: every parsed person is a judge in s1
         people.forEach(p => {
           pendingJudges.push({ name: p.name, ringId: ringNum, role, sessionId: 's1' });
         });
         return;
       }
 
-      // Multi-session ring
-      // Case A: cell split into one person per session → assign by index
+      // Multi-session, no time prefix
+      // Case A: split-by-separator gives one person per session → assign by index
       if (people.length === sessions.length && people.length > 1) {
         people.forEach((p, i) => {
           pendingJudges.push({ name: p.name, ringId: ringNum, role, sessionId: `s${i + 1}` });
@@ -1831,18 +1900,16 @@ function importCsvSheet() {
         return;
       }
 
-      // Case B: single name with time annotations, or fewer/more names than sessions
-      // For each parsed person, figure out matching sessions via time annotations
+      // Case B: single person with suffix time annotations
       people.forEach(p => {
-        const judgeTimes = p.times.map(normTime);
+        const judgeTimeKeys = p.times.map(normTime);
         const matchedSids = [];
-        sessions.forEach((s, i) => {
-          const st = normTime(s.time);
-          if (judgeTimes.length === 0) {
-            // No annotation → judge covers all sessions
-            matchedSids.push(`s${i + 1}`);
-          } else if (st && judgeTimes.includes(st)) {
-            matchedSids.push(`s${i + 1}`);
+        sessions.forEach(s => {
+          const stKey = normTime(s.time);
+          if (judgeTimeKeys.length === 0) {
+            matchedSids.push(s.id); // no annotation → covers all sessions
+          } else if (stKey && judgeTimeKeys.includes(stKey)) {
+            matchedSids.push(s.id);
           }
         });
         if (matchedSids.length === 0) matchedSids.push('s1');

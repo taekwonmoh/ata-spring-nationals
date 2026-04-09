@@ -352,6 +352,45 @@
       font-size: 0.9rem;
     }
     .modal-judge-row:last-child { border-bottom: none; }
+    .modal-judge-row .row-actions { display: flex; align-items: center; gap: 6px; }
+    .btn-cover {
+      padding: 5px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 700;
+      background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; cursor: pointer;
+    }
+    .btn-cover:hover { background: #fde68a; }
+    .btn-uncover {
+      padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700;
+      background: white; color: var(--gray); border: 1px solid var(--border); cursor: pointer;
+    }
+    .cover-picker {
+      margin: 6px 0 10px; padding: 10px; background: #fffbeb;
+      border: 2px solid #fcd34d; border-radius: 8px;
+    }
+    .cover-picker-title {
+      font-size: 0.78rem; font-weight: 800; color: #92400e;
+      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+    }
+    .cover-picker .sub-option {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; background: white; border-radius: 6px;
+      margin-top: 4px; border: 1px solid #fcd34d;
+    }
+    .cover-picker .sub-option button {
+      padding: 6px 12px; border-radius: 6px; border: none;
+      background: var(--green); color: white; font-weight: 700;
+      cursor: pointer; font-size: 0.78rem;
+    }
+    .cover-picker .empty {
+      font-size: 0.8rem; color: #92400e; padding: 4px 0;
+    }
+    .covered-by {
+      font-size: 0.75rem; color: #92400e; font-weight: 700; margin-top: 2px;
+    }
+    .covered-by .sub-pill {
+      display: inline-block; background: linear-gradient(135deg,#fde047,#facc15);
+      color: #78350f; padding: 1px 6px; border-radius: 8px;
+      font-weight: 800; margin-left: 4px;
+    }
     .judge-chip {
       padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700;
     }
@@ -1282,18 +1321,25 @@ function renderCheckin() {
     });
     visibleSubs.forEach(s => {
       const timeLabel = s.checkedIn && s.checkInTime ? `Checked in at ${s.checkInTime}` : '';
+      const covering = s.coveringRingId
+        ? `<div class="judge-event">Covering Ring ${s.coveringRingId}</div>`
+        : '';
+      const badgeText = s.coveringRingId ? `SUB &rarr; R${s.coveringRingId}` : 'SUB';
+      const actionBtn = s.coveringJudgeId
+        ? `<button class="btn-checkin undo" onclick="uncoverJudge(${s.coveringJudgeId})">Release</button>`
+        : (s.checkedIn
+            ? `<button class="btn-checkin undo" onclick="toggleSubCheckin(${s.id})">Undo Check-In</button>`
+            : `<button class="btn-checkin in"  onclick="toggleSubCheckin(${s.id})">Check In</button>`);
       html += `
         <div class="judge-row sub-row ${s.checkedIn ? 'checked-in' : ''}">
           <div style="font-size:1.6rem;">${s.checkedIn ? '&#10003;' : '&#9744;'}</div>
-          <div class="assignment-badge sub">SUB</div>
+          <div class="assignment-badge sub">${badgeText}</div>
           <div class="judge-info">
             <div class="judge-name">${esc(s.name)}</div>
+            ${covering}
             ${timeLabel ? `<div class="judge-time">${esc(timeLabel)}</div>` : ''}
           </div>
-          ${s.checkedIn
-            ? `<button class="btn-checkin undo" onclick="toggleSubCheckin(${s.id})">Undo Check-In</button>`
-            : `<button class="btn-checkin in"  onclick="toggleSubCheckin(${s.id})">Check In</button>`
-          }
+          ${actionBtn}
         </div>`;
     });
   }
@@ -2112,14 +2158,26 @@ function openModal(ringId) {
       sorted.forEach(j => {
         const isFirst = j.id === firstId;
         const timeStr = j.checkedIn && j.checkInTime ? ` &middot; ${esc(j.checkInTime)}` : '';
+        const coverSub = j.coveredBy ? findSubById(j.coveredBy) : null;
+        const coverLine = coverSub
+          ? `<div class="covered-by">Covered by <span class="sub-pill">${esc(coverSub.name)}</span></div>`
+          : '';
+        const actionHtml = j.checkedIn
+          ? (coverSub
+              ? `<button class="btn-uncover" onclick="uncoverJudge(${j.id})">Uncover</button>`
+              : `<span class="judge-chip chip-in">Checked In</span>`)
+          : `<button class="btn-cover" onclick="openCoverPicker(${j.id})">Cover with sub</button>
+             <span class="judge-chip chip-out">Not In</span>`;
         jHtml += `
           <div class="modal-judge-row ${isFirst ? 'is-first' : ''}">
             <div>
               <div style="font-weight:600;">${esc(j.name)}${isFirst ? '<span class="first-badge">1ST IN</span>' : ''}</div>
               <div style="font-size:0.78rem;color:var(--gray);">${esc(j.role||'Judge')}${timeStr}</div>
+              ${coverLine}
             </div>
-            <span class="judge-chip ${j.checkedIn ? 'chip-in' : 'chip-out'}">${j.checkedIn ? 'Checked In' : 'Not In'}</span>
-          </div>`;
+            <div class="row-actions">${actionHtml}</div>
+          </div>
+          <div id="coverPicker_${j.id}" style="display:none;"></div>`;
       });
     });
   }
@@ -2145,6 +2203,111 @@ function openModal(ringId) {
 function closeModal() {
   document.getElementById('ringModal').classList.remove('open');
   modalRingId = null;
+}
+
+// ──────── Cover with substitute ────────
+function findSubById(id) {
+  const subs = currentSubs();
+  return subs.find(s => s.id == id) || null;
+}
+
+function findJudgeById(id) {
+  const judges = currentJudges();
+  return judges.find(j => j.id == id) || null;
+}
+
+function openCoverPicker(judgeId) {
+  const picker = document.getElementById(`coverPicker_${judgeId}`);
+  if (!picker) return;
+  // Toggle off if already open
+  if (picker.style.display === 'block') {
+    picker.style.display = 'none';
+    picker.innerHTML = '';
+    return;
+  }
+  // Hide all other open pickers
+  document.querySelectorAll('[id^="coverPicker_"]').forEach(el => {
+    el.style.display = 'none'; el.innerHTML = '';
+  });
+
+  const judge = findJudgeById(judgeId);
+  if (!judge) return;
+  // Available subs = subs in this round who are NOT already covering someone
+  const subs = currentSubs().filter(s => !s.coveringJudgeId);
+  let html = `<div class="cover-picker">
+    <div class="cover-picker-title">Pick a substitute to cover ${esc(judge.name)}</div>`;
+  if (subs.length === 0) {
+    html += `<div class="empty">No available substitutes. Add one in Setup or check that no sub is already covering another slot.</div>`;
+  } else {
+    subs.forEach(s => {
+      const inLabel = s.checkedIn ? ' &middot; <span style="color:var(--green);font-weight:700;">checked in</span>' : '';
+      html += `
+        <div class="sub-option">
+          <div>
+            <div style="font-weight:700;">${esc(s.name)}</div>
+            <div style="font-size:0.72rem;color:var(--gray);">${esc(s.role||'Substitute')}${inLabel}</div>
+          </div>
+          <button onclick="coverWithSub(${judgeId}, ${s.id})">Use</button>
+        </div>`;
+    });
+  }
+  html += `<div style="margin-top:8px;text-align:right;">
+    <button class="btn-uncover" onclick="openCoverPicker(${judgeId})">Cancel</button>
+  </div></div>`;
+  picker.innerHTML = html;
+  picker.style.display = 'block';
+}
+
+function coverWithSub(judgeId, subId) {
+  const key = currentRoundKey();
+  const judge = findJudgeById(judgeId);
+  const sub = findSubById(subId);
+  if (!judge || !sub) return toast('Could not find judge or substitute.');
+
+  const now = new Date();
+  const tStr = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const tStamp = now.getTime();
+
+  const updates = {};
+  // Mark the original judge as covered + checked in (so the ring goes ready)
+  updates[`tournament/rounds/${key}/judges/${judgeId}/checkedIn`] = true;
+  updates[`tournament/rounds/${key}/judges/${judgeId}/checkInTime`] = tStr;
+  updates[`tournament/rounds/${key}/judges/${judgeId}/checkInTimestamp`] = tStamp;
+  updates[`tournament/rounds/${key}/judges/${judgeId}/coveredBy`] = subId;
+  // Auto check-in the sub and link them to the slot they're covering
+  updates[`tournament/rounds/${key}/subs/${subId}/checkedIn`] = true;
+  updates[`tournament/rounds/${key}/subs/${subId}/checkInTime`] = tStr;
+  updates[`tournament/rounds/${key}/subs/${subId}/checkInTimestamp`] = tStamp;
+  updates[`tournament/rounds/${key}/subs/${subId}/coveringJudgeId`] = judgeId;
+  updates[`tournament/rounds/${key}/subs/${subId}/coveringRingId`] = judge.ringId || null;
+  updates[`tournament/rounds/${key}/subs/${subId}/coveringSessionId`] = judge.sessionId || 's1';
+  db.ref().update(updates).catch(fbErr);
+  toast(`${sub.name} now covering ${judge.name} on Ring ${judge.ringId}.`);
+
+  // Re-render modal so it reflects the new state
+  setTimeout(() => { if (modalRingId) openModal(modalRingId); }, 100);
+}
+
+function uncoverJudge(judgeId) {
+  const key = currentRoundKey();
+  const judge = findJudgeById(judgeId);
+  if (!judge || !judge.coveredBy) return;
+  const subId = judge.coveredBy;
+
+  const updates = {};
+  // Revert the judge to not-checked-in
+  updates[`tournament/rounds/${key}/judges/${judgeId}/checkedIn`] = false;
+  updates[`tournament/rounds/${key}/judges/${judgeId}/checkInTime`] = null;
+  updates[`tournament/rounds/${key}/judges/${judgeId}/checkInTimestamp`] = null;
+  updates[`tournament/rounds/${key}/judges/${judgeId}/coveredBy`] = null;
+  // Free the sub (keep them checked in — they're still on site)
+  updates[`tournament/rounds/${key}/subs/${subId}/coveringJudgeId`] = null;
+  updates[`tournament/rounds/${key}/subs/${subId}/coveringRingId`] = null;
+  updates[`tournament/rounds/${key}/subs/${subId}/coveringSessionId`] = null;
+  db.ref().update(updates).catch(fbErr);
+  toast(`Removed substitute coverage for ${judge.name}.`);
+
+  setTimeout(() => { if (modalRingId) openModal(modalRingId); }, 100);
 }
 
 function setRingStatus(status) {

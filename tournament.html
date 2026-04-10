@@ -1849,8 +1849,29 @@ function parseSessionsFromEventCell(eventCol) {
 
   const scoreMatches = [...eventCol.matchAll(scoreRe)];
 
-  // Single session — keep the whole cell as the event name
+  // When there are fewer than 2 score patterns, check whether the cell
+  // still contains multiple "CODE - TIME" or "TIME CODE" pairs (e.g.
+  // "TM/678/2739/A - 10:00AM  TM/678/2739/B - 1:00PM" with no scores).
   if (scoreMatches.length <= 1) {
+    // Find all code+time or time+code pairs in the cell
+    const allTimes = [...eventCol.matchAll(new RegExp(timeRe.source, 'gi'))];
+    const allCodes = [...eventCol.matchAll(new RegExp(codeRe.source, 'g'))];
+    if (allTimes.length >= 2 && allCodes.length >= 2) {
+      // Pair each code with its nearest time
+      const pairs = allCodes.map(cm => {
+        let bestTime = null, bestDist = Infinity;
+        allTimes.forEach(tm => {
+          const dist = Math.abs(tm.index - (cm.index + cm[0].length));
+          const dist2 = Math.abs(cm.index - (tm.index + tm[0].length));
+          const d = Math.min(dist, dist2);
+          if (d < bestDist) { bestDist = d; bestTime = tm; }
+        });
+        return { time: bestTime ? bestTime[0].trim() : '', eventName: cm[0] };
+      });
+      pairs.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+      return pairs;
+    }
+    // Truly single session
     const time = (eventCol.match(timeRe) || [''])[0].trim();
     const codeM = eventCol.match(codeRe);
     const eventName = codeM ? codeM[0] : cleanName(eventCol);

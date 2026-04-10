@@ -784,6 +784,19 @@
         </div>
       </div>
 
+      <!-- Full Tournament Reset -->
+      <div class="setup-card" style="grid-column: span 2; margin-top: 40px; border: 2px solid var(--red); background: #fef2f2;">
+        <h3 style="color: var(--red);">Reset Tournament</h3>
+        <p style="font-size: 0.85rem; color: var(--text2); margin-bottom: 14px;">
+          Permanently erase <strong>all data</strong> &mdash; every day, every round, all judges, substitutes,
+          check-ins, ring statuses, events, and sessions. The app will return to a blank slate
+          ready for a new tournament. <strong>This cannot be undone.</strong>
+        </p>
+        <button class="btn-primary" style="background: var(--red);" onclick="resetEntireTournament()">
+          Reset Everything for New Tournament
+        </button>
+      </div>
+
     </div>
   </div>
 
@@ -1724,6 +1737,22 @@ function resetRoundCheckIns() {
     db.ref().update(updates).catch(fbErr);
   }
   toast(`Check-ins reset for Day ${currentDay}, Round ${currentRound}.`);
+}
+
+// ──────── Full tournament reset ────────
+function resetEntireTournament() {
+  if (!isAdmin) return toast('Admin access required.');
+  if (!confirm('RESET ENTIRE TOURNAMENT?\n\nThis will permanently erase ALL data — every day, round, judges, subs, check-ins, ring statuses, events, and sessions.\n\nThis CANNOT be undone.')) return;
+  if (!confirm('Are you ABSOLUTELY sure? Type the admin password in the next prompt to confirm.')) return;
+  const pw = prompt('Type the admin password to confirm full reset:');
+  if (pw !== ADMIN_PASSWORD) return toast('Incorrect password. Reset cancelled.');
+  stateRef.set(defaultState()).then(() => {
+    currentDay = 1;
+    currentRound = 1;
+    toast('Tournament has been completely reset.');
+    renderDayRoundBar();
+    renderAll();
+  }).catch(fbErr);
 }
 
 // ════════════════════════════════════════════════════════

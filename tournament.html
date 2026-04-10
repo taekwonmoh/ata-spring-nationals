@@ -2150,41 +2150,49 @@ function importCsvSheet() {
   if (pendingJudges.length === 0) return toast('No judges found in CSV.');
 
   fbAllocateIds(pendingJudges.length).then(startId => {
-    const updates = {};
-    // Wipe old judges, events, and sessions so stale data doesn't persist
-    updates[`tournament/rounds/${key}/judges`] = null;
-    updates[`tournament/rounds/${key}/events`] = null;
-    updates[`tournament/rounds/${key}/sessions`] = null;
-    pendingJudges.forEach((j, idx) => {
-      const id = startId + idx;
-      updates[`tournament/rounds/${key}/judges/${id}`] = {
-        id, name: j.name, ringId: j.ringId, role: j.role,
-        sessionId: j.sessionId,
-        checkedIn: false, checkInTime: null, checkInTimestamp: null
-      };
-    });
-    Object.entries(pendingEvents).forEach(([ringId, eventName]) => {
-      updates[`tournament/rounds/${key}/events/${ringId}`] = eventName;
-    });
-    Object.entries(pendingSessions).forEach(([ringId, sess]) => {
-      updates[`tournament/rounds/${key}/sessions/${ringId}`] = sess;
-    });
-    if (maxRing > state.ringCount) {
-      updates['tournament/ringCount'] = maxRing;
-    }
-    // Auto-populate the round time with the most common session time, if any
-    const existingRoundTime = (state.roundTimes && state.roundTimes[key]) || '';
-    if (!existingRoundTime) {
-      const top = Object.entries(timeFreq).sort((a,b) => b[1] - a[1])[0];
-      if (top && top[0]) {
-        updates[`tournament/roundTimes/${key}`] = top[0];
+    // Step 1: wipe old judges, events, and sessions so stale data doesn't persist.
+    // This must be a separate write because Firebase multi-path update treats
+    // "judges = null" and "judges/123 = {...}" as conflicting — the null gets
+    // ignored when deeper paths exist in the same update object.
+    const wipe = {};
+    wipe[`tournament/rounds/${key}/judges`] = null;
+    wipe[`tournament/rounds/${key}/events`] = null;
+    wipe[`tournament/rounds/${key}/sessions`] = null;
+    return db.ref().update(wipe).then(() => {
+      // Step 2: write new data
+      const updates = {};
+      pendingJudges.forEach((j, idx) => {
+        const id = startId + idx;
+        updates[`tournament/rounds/${key}/judges/${id}`] = {
+          id, name: j.name, ringId: j.ringId, role: j.role,
+          sessionId: j.sessionId,
+          checkedIn: false, checkInTime: null, checkInTimestamp: null
+        };
+      });
+      Object.entries(pendingEvents).forEach(([ringId, eventName]) => {
+        updates[`tournament/rounds/${key}/events/${ringId}`] = eventName;
+      });
+      Object.entries(pendingSessions).forEach(([ringId, sess]) => {
+        updates[`tournament/rounds/${key}/sessions/${ringId}`] = sess;
+      });
+      if (maxRing > state.ringCount) {
+        updates['tournament/ringCount'] = maxRing;
       }
-    }
-    db.ref().update(updates).catch(fbErr);
+      // Auto-populate the round time with the most common session time, if any
+      const existingRoundTime = (state.roundTimes && state.roundTimes[key]) || '';
+      if (!existingRoundTime) {
+        const top = Object.entries(timeFreq).sort((a,b) => b[1] - a[1])[0];
+        if (top && top[0]) {
+          updates[`tournament/roundTimes/${key}`] = top[0];
+        }
+      }
+      return db.ref().update(updates);
+    });
+  }).then(() => {
     const ringCount = Object.keys(pendingEvents).length;
     const extraNote = multiSessionRings > 0 ? ` (${multiSessionRings} with multiple sessions)` : '';
     toast(`Imported ${pendingJudges.length} judges across ${ringCount} rings${extraNote}.`);
-  }).catch(()=>{});
+  }).catch(fbErr);
 
   document.getElementById('bulkImport').value = '';
   document.getElementById('csvFileInput').value = '';

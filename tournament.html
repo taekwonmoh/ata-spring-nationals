@@ -1871,10 +1871,10 @@ function parseSessionsFromEventCell(eventCol) {
       pairs.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
       return pairs;
     }
-    // Truly single session
+    // Truly single session — use the full cell text as the event name
+    // (preserves descriptive names like "ELITE- TEAM SPARRING/COMBAT")
     const time = (eventCol.match(timeRe) || [''])[0].trim();
-    const codeM = eventCol.match(codeRe);
-    const eventName = codeM ? codeM[0] : cleanName(eventCol);
+    const eventName = cleanName(eventCol) || eventCol.replace(/\s{2,}/g, ' ').trim();
     return [{ time, eventName }];
   }
 
